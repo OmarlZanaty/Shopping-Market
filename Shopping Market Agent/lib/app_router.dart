@@ -12,20 +12,49 @@ import 'features/orders/presentation/picking_screen.dart';
 import 'features/scanner/barcode_scanner_screen.dart';
 import 'features/scanner/camera_proof_screen.dart';
 
+/// A [ChangeNotifier] that bridges Riverpod auth state → GoRouter's
+/// [refreshListenable]. GoRouter calls [refresh] and re-runs the redirect
+/// whenever this notifier fires — without recreating the router.
+class _AuthListenable extends ChangeNotifier {
+  AgentSession? _session;
+
+  bool get loggedIn => _session?.isAuthenticated ?? false;
+
+  void update(AsyncValue<AgentSession> auth) {
+    final next = auth.valueOrNull;
+    if (next != _session) {
+      _session = next;
+      notifyListeners();
+    }
+  }
+}
+
+/// The router is created ONCE and lives for the duration of the provider.
+/// Auth changes are fed through [_AuthListenable] so GoRouter re-evaluates
+/// the redirect without rebuilding the entire router tree.
 final agentRouterProvider = Provider<GoRouter>((ref) {
-  final auth = ref.watch(agentAuthControllerProvider);
-  return GoRouter(
+  final notifier = _AuthListenable();
+
+  // Mirror auth state into the notifier.
+  ref.listen<AsyncValue<AgentSession>>(
+    agentAuthControllerProvider,
+    (_, next) => notifier.update(next),
+  );
+  // Seed initial state.
+  notifier.update(ref.read(agentAuthControllerProvider));
+
+  final router = GoRouter(
     initialLocation: '/',
+    refreshListenable: notifier,
     redirect: (context, state) {
-      final s = auth.valueOrNull;
-      final loggedIn = s?.isAuthenticated ?? false;
+      final loggedIn = notifier.loggedIn;
       final goingToLogin = state.matchedLocation == '/login';
       if (!loggedIn && !goingToLogin) return '/login';
       if (loggedIn && goingToLogin) return '/';
       return null;
     },
     routes: [
-      GoRoute(path: '/', builder: (_, __) => const RoleGateScreen()),
+      GoRoute(path: '/',      builder: (_, __) => const RoleGateScreen()),
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(
         path: '/order/:id',
@@ -44,4 +73,11 @@ final agentRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/scanner-inventory', builder: (_, __) => const ScannerInventoryScreen()),
     ],
   );
+
+  ref.onDispose(() {
+    router.dispose();
+    notifier.dispose();
+  });
+
+  return router;
 });

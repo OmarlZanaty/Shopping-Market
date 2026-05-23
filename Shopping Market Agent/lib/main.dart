@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-
 import 'app_router.dart';
 import 'core/constants/app_colors.dart';
 import 'core/network/dio_client.dart';
@@ -55,8 +53,6 @@ class AgentApp extends ConsumerStatefulWidget {
 }
 
 class _AgentAppState extends ConsumerState<AgentApp> {
-  final GlobalKey<NavigatorState> _rootKey = GlobalKey();
-
   @override
   void initState() {
     super.initState();
@@ -64,11 +60,15 @@ class _AgentAppState extends ConsumerState<AgentApp> {
   }
 
   Future<void> _onIncomingOrder(Map<String, dynamic> data) async {
-    final nav = _rootKey.currentState;
-    if (nav == null) return;
     final orderId = data['order_id']?.toString();
     if (orderId == null || orderId.isEmpty) return;
 
+    final router = ref.read(agentRouterProvider);
+    final nav = router.routerDelegate.navigatorKey.currentState;
+    if (nav == null) return;
+
+    // Push the full-screen overlay on GoRouter's own navigator so it covers
+    // the current screen and the GoRouter back button / context are intact.
     final result = await nav.push<String>(
       MaterialPageRoute(
         fullscreenDialog: true,
@@ -83,9 +83,7 @@ class _AgentAppState extends ConsumerState<AgentApp> {
     );
 
     if (result == 'accepted') {
-      // Open order detail.
-      final ctx = _rootKey.currentContext;
-      if (ctx != null) GoRouter.of(ctx).push('/order/$orderId');
+      router.push('/order/$orderId');
     }
     // Refresh queues.
     // ignore: unused_result
@@ -94,6 +92,7 @@ class _AgentAppState extends ConsumerState<AgentApp> {
 
   @override
   Widget build(BuildContext context) {
+    // Read (not watch) — router is stable, created once.
     final router = ref.watch(agentRouterProvider);
     return MaterialApp.router(
       title: 'Shopping Market Agent',
@@ -107,17 +106,10 @@ class _AgentAppState extends ConsumerState<AgentApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      builder: (context, child) {
-        return Directionality(
-          textDirection: TextDirection.rtl,
-          // Wrap with a Navigator we control so we can push the overlay over
-          // anything — even modals — without a BuildContext fight.
-          child: Navigator(
-            key: _rootKey,
-            onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => child!),
-          ),
-        );
-      },
+      builder: (context, child) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: child!,
+      ),
     );
   }
 }
