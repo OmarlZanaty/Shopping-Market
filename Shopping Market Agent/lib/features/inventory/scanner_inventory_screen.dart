@@ -4,22 +4,48 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/network/dio_client.dart';
 import '../../core/network/api_envelope.dart';
+import '../../core/constants/api_constants.dart';
 import '../orders/data/orders_api.dart';
 import '../scanner/barcode_scanner_screen.dart';
 
-// ─── Providers ───────────────────────────────────────────────────────────────
+// ─── Data / API ───────────────────────────────────────────────────────────────
 
-final _searchProvider = StateProvider<String>((ref) => '');
+class _InventoryPage {
+  final List<Map<String, dynamic>> items;
+  final int total;
+  final int totalPages;
+  final bool hasMore;
+  const _InventoryPage({
+    required this.items,
+    required this.total,
+    required this.totalPages,
+    required this.hasMore,
+  });
+}
 
-final _inventoryProvider = FutureProvider.autoDispose
-    .family<List<Map<String, dynamic>>, String>((ref, query) async {
-  return OrdersApi().listInventory(q: query.isEmpty ? null : query);
-});
+Future<_InventoryPage> _fetchPage(String query, int page) async {
+  final dio = DioClient.I.dio;
+  final res = await dio.get(
+    ApiConstants.inventoryProducts,
+    queryParameters: {
+      if (query.isNotEmpty) 'q': query,
+      'page': page,
+      'limit': 40,
+    },
+  );
+  final body = res.data as Map<String, dynamic>;
+  final List<dynamic> raw = body['data'] ?? [];
+  final pag = (body['pagination'] as Map?) ?? {};
+  return _InventoryPage(
+    items: raw.map((e) => Map<String, dynamic>.from(e as Map)).toList(),
+    total: (pag['total'] as int?) ?? raw.length,
+    totalPages: (pag['totalPages'] as int?) ?? 1,
+    hasMore: (pag['hasMore'] as bool?) ?? false,
+  );
+}
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
-/// Shows all products with their availability status.
-/// FAB opens the barcode scanner; scanned products are highlighted in a bottom sheet.
 class ScannerInventoryScreen extends ConsumerStatefulWidget {
   const ScannerInventoryScreen({super.key});
 
@@ -31,46 +57,98 @@ class ScannerInventoryScreen extends ConsumerStatefulWidget {
 class _ScannerInventoryScreenState
     extends ConsumerState<ScannerInventoryScreen> {
   final _searchCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+
+  String _query = '';
+  final List<Map<String, dynamic>> _products = [];
+  int _page = 1;
+  int _total = 0;
+  bool _hasMore = true;
+  bool _loadingFirst = true;
+  bool _loadingMore = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPage(reset: true);
+    _scrollCtrl.addListener(_onScroll);
+  }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
-  // ── Barcode scan ──────────────────────────────────────────────────────────
+  // ── Pagination ────────────────────────────────────────────────────────────
 
-  Future<void> _openScanner() async {
-    final barcode = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()),
-    );
-    if (barcode == null || barcode.isEmpty || !mounted) return;
-    _showScannedProduct(barcode);
+  void _onScroll() {
+    if (_loadingMore || !_hasMore) return;
+    final pos = _scrollCtrl.position;
+    if (pos.pixels >= pos.maxScrollExtent - 300) {
+      _loadPage();
+    }
   }
 
-  Future<void> _showScannedProduct(String barcode) async {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.backgroundSecondary,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _ScannedProductSheet(barcode: barcode),
-    );
+  Future<void> _loadPage({bool reset = false}) async {
+    if (reset) {
+      setState(() {
+        _loadingFirst = true;
+        _error = null;
+        _page = 1;
+        _products.clear();
+        _hasMore = true;
+      });
+    } else {
+      if (_loadingMore) return;
+      setState(() => _loadingMore = true);
+    }
+
+    try {
+      final result = await _fetchPage(_query, _page);
+      if (!mounted) return;
+      setState(() {
+        _products.addAll(result.items);
+        _total = result.total;
+        _hasMore = result.hasMore;
+        _page++;
+        _loadingFirst = false;
+        _loadingMore = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loadingFirst = false;
+        _loadingMore = false;
+      });
+    }
+  }
+
+  // ── Search ────────────────────────────────────────────────────────────────
+
+  void _onSearchChanged(String v) {
+    final q = v.trim();
+    if (q == _query) return;
+    _query = q;
+    _loadPage(reset: true);
   }
 
   // ── Toggle ────────────────────────────────────────────────────────────────
 
-  Future<void> _toggle(String productId, bool currentValue) async {
+  Future<void> _toggle(int index) async {
+    final p = _products[index];
+    final pid = p['id'].toString();
     try {
-      final newValue = await OrdersApi().toggleAvailability(productId);
+      final newVal = await OrdersApi().toggleAvailability(pid);
       if (!mounted) return;
-      final q = ref.read(_searchProvider);
-      ref.invalidate(_inventoryProvider(q));
+      setState(() => _products[index] = {...p, 'is_available': newVal});
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(newValue ? 'تم تفعيل المنتج ✓' : 'تم إيقاف المنتج'),
+        content: Text(newVal ? 'تم تفعيل المنتج ✓' : 'تم إيقاف المنتج'),
         backgroundColor:
-            newValue ? AppColors.successGreen : AppColors.textSecondary,
+            newVal ? AppColors.successGreen : AppColors.textSecondary,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
       ));
@@ -84,10 +162,41 @@ class _ScannerInventoryScreenState
     }
   }
 
+  // ── Barcode scanner ───────────────────────────────────────────────────────
+
+  Future<void> _openScanner() async {
+    final barcode = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()),
+    );
+    if (barcode == null || barcode.isEmpty || !mounted) return;
+    _showScannedProduct(barcode);
+  }
+
+  void _showScannedProduct(String barcode) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _ScannedProductSheet(
+        barcode: barcode,
+        onToggled: (pid, newVal) {
+          // Update the product in the loaded list if it's visible
+          final idx = _products.indexWhere((p) => p['id'].toString() == pid);
+          if (idx != -1) {
+            setState(() => _products[idx] = {..._products[idx], 'is_available': newVal});
+          }
+        },
+      ),
+    );
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final query = ref.watch(_searchProvider);
-    final inventoryAsync = ref.watch(_inventoryProvider(query));
+    final activeCount = _products.where((p) => p['is_available'] == true).length;
 
     return Scaffold(
       backgroundColor: AppColors.backgroundPrimary,
@@ -105,19 +214,19 @@ class _ScannerInventoryScreenState
               style: const TextStyle(color: AppColors.textPrimary),
               decoration: InputDecoration(
                 hintText: 'بحث باسم المنتج أو الباركود...',
-                hintStyle:
-                    const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                hintStyle: const TextStyle(
+                    color: AppColors.textSecondary, fontSize: 13),
                 filled: true,
                 fillColor: AppColors.backgroundSecondary,
                 prefixIcon: const Icon(Icons.search,
                     color: AppColors.textSecondary, size: 20),
-                suffixIcon: query.isNotEmpty
+                suffixIcon: _query.isNotEmpty
                     ? IconButton(
                         icon: const Icon(Icons.clear,
                             color: AppColors.textSecondary, size: 18),
                         onPressed: () {
                           _searchCtrl.clear();
-                          ref.read(_searchProvider.notifier).state = '';
+                          _onSearchChanged('');
                         },
                       )
                     : null,
@@ -128,8 +237,7 @@ class _ScannerInventoryScreenState
                   borderSide: BorderSide.none,
                 ),
               ),
-              onChanged: (v) =>
-                  ref.read(_searchProvider.notifier).state = v.trim(),
+              onChanged: _onSearchChanged,
             ),
           ),
         ),
@@ -140,131 +248,159 @@ class _ScannerInventoryScreenState
         icon: const Icon(Icons.qr_code_scanner),
         label: const Text('مسح باركود'),
       ),
-      body: inventoryAsync.when(
-        loading: () => const Center(
-            child: CircularProgressIndicator(color: AppColors.accentOrange)),
-        error: (e, _) => Center(
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      body: _loadingFirst
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.accentOrange))
+          : _error != null && _products.isEmpty
+              ? _ErrorView(
+                  message: _error!,
+                  onRetry: () => _loadPage(reset: true),
+                )
+              : Column(children: [
+                  // Stats bar
+                  _StatsBar(
+                    active: activeCount,
+                    inactive: _products.length - activeCount,
+                    total: _total,
+                    loaded: _products.length,
+                  ),
+
+                  // Product list
+                  Expanded(
+                    child: RefreshIndicator(
+                      color: AppColors.accentOrange,
+                      onRefresh: () => _loadPage(reset: true),
+                      child: _products.isEmpty
+                          ? ListView(children: [
+                              const SizedBox(height: 120),
+                              const Icon(Icons.inventory_2_outlined,
+                                  color: AppColors.textSecondary, size: 64),
+                              const SizedBox(height: 12),
+                              Center(
+                                child: Text(
+                                  _query.isEmpty
+                                      ? 'لا توجد منتجات'
+                                      : 'لا نتائج لـ "$_query"',
+                                  style: const TextStyle(
+                                      color: AppColors.textSecondary),
+                                ),
+                              ),
+                            ])
+                          : ListView.builder(
+                              controller: _scrollCtrl,
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                              itemCount:
+                                  _products.length + (_hasMore ? 1 : 0),
+                              itemBuilder: (_, i) {
+                                if (i == _products.length) {
+                                  return const Padding(
+                                    padding: EdgeInsets.all(16),
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                          color: AppColors.accentOrange,
+                                          strokeWidth: 2),
+                                    ),
+                                  );
+                                }
+                                return _ProductRow(
+                                  key: ValueKey(_products[i]['id']),
+                                  product: _products[i],
+                                  onToggle: () => _toggle(i),
+                                );
+                              },
+                            ),
+                    ),
+                  ),
+                ]),
+    );
+  }
+}
+
+// ─── Stats bar ────────────────────────────────────────────────────────────────
+
+class _StatsBar extends StatelessWidget {
+  final int active, inactive, total, loaded;
+  const _StatsBar(
+      {required this.active,
+      required this.inactive,
+      required this.total,
+      required this.loaded});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.backgroundSecondary,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+          _Chip(label: 'نشط', value: '$active', color: AppColors.successGreen),
+          Container(width: 1, height: 28, color: AppColors.divider),
+          _Chip(label: 'موقوف', value: '$inactive', color: AppColors.errorRed),
+          Container(width: 1, height: 28, color: AppColors.divider),
+          _Chip(
+              label: 'الإجمالي',
+              value: '$total',
+              color: AppColors.textSecondary),
+        ]),
+      );
+}
+
+class _Chip extends StatelessWidget {
+  final String label, value;
+  final Color color;
+  const _Chip(
+      {required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+        Text(value,
+            style: TextStyle(
+                color: color, fontSize: 17, fontWeight: FontWeight.bold)),
+        Text(label,
+            style: const TextStyle(
+                color: AppColors.textSecondary, fontSize: 11)),
+      ]);
+}
+
+// ─── Error view ───────────────────────────────────────────────────────────────
+
+class _ErrorView extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _ErrorView({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child:
+              Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             const Icon(Icons.cloud_off, color: AppColors.errorRed, size: 56),
             const SizedBox(height: 12),
-            Text(e.toString(),
+            Text(message,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.textSecondary)),
+                style:
+                    const TextStyle(color: AppColors.textSecondary)),
             const SizedBox(height: 12),
             ElevatedButton(
-              onPressed: () => ref.refresh(_inventoryProvider(query)),
+              onPressed: onRetry,
               style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.accentOrange),
               child: const Text('إعادة المحاولة'),
             ),
           ]),
         ),
-        data: (products) {
-          if (products.isEmpty) {
-            return Center(
-              child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.inventory_2_outlined,
-                        color: AppColors.textSecondary, size: 64),
-                    const SizedBox(height: 12),
-                    Text(
-                      query.isEmpty ? 'لا توجد منتجات' : 'لا نتائج لـ "$query"',
-                      style: const TextStyle(color: AppColors.textSecondary),
-                    ),
-                  ]),
-            );
-          }
-
-          // Stats bar
-          final activeCount =
-              products.where((p) => p['is_available'] == true).length;
-          final inactiveCount = products.length - activeCount;
-
-          return Column(children: [
-            // Summary bar
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: AppColors.backgroundSecondary,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _StatChip(
-                        label: 'نشط',
-                        count: activeCount,
-                        color: AppColors.successGreen),
-                    Container(width: 1, height: 28, color: AppColors.divider),
-                    _StatChip(
-                        label: 'موقوف',
-                        count: inactiveCount,
-                        color: AppColors.errorRed),
-                    Container(width: 1, height: 28, color: AppColors.divider),
-                    _StatChip(
-                        label: 'الإجمالي',
-                        count: products.length,
-                        color: AppColors.textSecondary),
-                  ]),
-            ),
-
-            // Product list
-            Expanded(
-              child: RefreshIndicator(
-                color: AppColors.accentOrange,
-                onRefresh: () async => ref.invalidate(_inventoryProvider(query)),
-                child: ListView.builder(
-                  padding:
-                      const EdgeInsets.fromLTRB(16, 8, 16, 96), // 96 for FAB
-                  itemCount: products.length,
-                  itemBuilder: (_, i) {
-                    final p = products[i];
-                    return _ProductRow(
-                      product: p,
-                      onToggle: () =>
-                          _toggle(p['id'].toString(), p['is_available'] == true),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ]);
-        },
-      ),
-    );
-  }
-}
-
-// ─── Stat chip ───────────────────────────────────────────────────────────────
-
-class _StatChip extends StatelessWidget {
-  final String label;
-  final int count;
-  final Color color;
-  const _StatChip(
-      {required this.label, required this.count, required this.color});
-
-  @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          Text('$count',
-              style: TextStyle(
-                  color: color, fontSize: 18, fontWeight: FontWeight.bold)),
-          Text(label,
-              style: const TextStyle(
-                  color: AppColors.textSecondary, fontSize: 11)),
-        ],
       );
 }
 
-// ─── Product row ─────────────────────────────────────────────────────────────
+// ─── Product row ──────────────────────────────────────────────────────────────
 
 class _ProductRow extends StatefulWidget {
   final Map<String, dynamic> product;
   final VoidCallback onToggle;
-  const _ProductRow({required this.product, required this.onToggle});
+  const _ProductRow({super.key, required this.product, required this.onToggle});
 
   @override
   State<_ProductRow> createState() => _ProductRowState();
@@ -281,72 +417,66 @@ class _ProductRowState extends State<_ProductRow> {
     final price = (p['current_price'] as num?)?.toDouble() ?? 0.0;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: AppColors.backgroundSecondary,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isAvailable
-              ? AppColors.successGreen.withOpacity(0.3)
+              ? AppColors.successGreen.withOpacity(0.25)
               : AppColors.divider,
-          width: 1,
         ),
       ),
       child: ListTile(
+        dense: true,
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: isAvailable
-                ? AppColors.successGreen.withOpacity(0.15)
-                : AppColors.backgroundPrimary,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(
-            isAvailable ? Icons.check_circle : Icons.cancel_outlined,
-            color: isAvailable ? AppColors.successGreen : AppColors.textSecondary,
-            size: 24,
-          ),
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        leading: Icon(
+          isAvailable ? Icons.check_circle : Icons.cancel_outlined,
+          color: isAvailable
+              ? AppColors.successGreen
+              : AppColors.textSecondary,
+          size: 22,
         ),
         title: Text(
           p['name_ar'] ?? p['name_en'] ?? '—',
           style: TextStyle(
-            color: isAvailable ? AppColors.textPrimary : AppColors.textSecondary,
+            color:
+                isAvailable ? AppColors.textPrimary : AppColors.textSecondary,
             fontWeight: FontWeight.w600,
-            fontSize: 14,
+            fontSize: 13,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Row(children: [
-          Text(
-            '${price.toStringAsFixed(1)} ج',
-            style: const TextStyle(
-                color: AppColors.accentOrange,
-                fontSize: 12,
-                fontFamily: 'Inter'),
-          ),
-          const SizedBox(width: 10),
-          if (stockQty > 0)
-            Text('مخزون: $stockQty',
+          if (price > 0)
+            Text('${price.toStringAsFixed(1)} ج',
                 style: const TextStyle(
-                    color: AppColors.textSecondary, fontSize: 11))
-          else
-            const Text('نفذ المخزون',
-                style: TextStyle(color: AppColors.errorRed, fontSize: 11)),
+                    color: AppColors.accentOrange,
+                    fontSize: 11,
+                    fontFamily: 'Inter')),
+          if (price > 0) const SizedBox(width: 8),
+          Text(
+            stockQty > 0 ? 'مخزون: $stockQty' : 'نفذ',
+            style: TextStyle(
+                color: stockQty > 0
+                    ? AppColors.textSecondary
+                    : AppColors.errorRed,
+                fontSize: 11),
+          ),
         ]),
         trailing: _loading
             ? const SizedBox(
-                width: 24,
-                height: 24,
+                width: 22,
+                height: 22,
                 child: CircularProgressIndicator(
                     strokeWidth: 2, color: AppColors.accentOrange))
             : Switch(
                 value: isAvailable,
                 activeColor: AppColors.successGreen,
                 inactiveThumbColor: AppColors.textSecondary,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 onChanged: (_) async {
                   setState(() => _loading = true);
                   try {
@@ -361,11 +491,13 @@ class _ProductRowState extends State<_ProductRow> {
   }
 }
 
-// ─── Scanned product bottom sheet ─────────────────────────────────────────────
+// ─── Scanned product bottom sheet ────────────────────────────────────────────
 
 class _ScannedProductSheet extends StatefulWidget {
   final String barcode;
-  const _ScannedProductSheet({required this.barcode});
+  final void Function(String productId, bool newVal) onToggled;
+  const _ScannedProductSheet(
+      {required this.barcode, required this.onToggled});
 
   @override
   State<_ScannedProductSheet> createState() => _ScannedProductSheetState();
@@ -388,7 +520,8 @@ class _ScannedProductSheetState extends State<_ScannedProductSheet> {
       final data = await OrdersApi().inventoryScan(widget.barcode);
       if (mounted) setState(() { _product = data; _loading = false; });
     } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _loading = false; });
+      if (mounted)
+        setState(() { _error = e.toString(); _loading = false; });
     }
   }
 
@@ -396,17 +529,15 @@ class _ScannedProductSheetState extends State<_ScannedProductSheet> {
     if (_product == null || _toggling) return;
     setState(() => _toggling = true);
     try {
-      final newValue =
+      final newVal =
           await OrdersApi().toggleAvailability(_product!['id'].toString());
       if (!mounted) return;
-      setState(() {
-        _product!['is_available'] = newValue;
-        _toggling = false;
-      });
+      setState(() { _product!['is_available'] = newVal; _toggling = false; });
+      widget.onToggled(_product!['id'].toString(), newVal);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(newValue ? 'تم تفعيل المنتج ✓' : 'تم إيقاف المنتج'),
+        content: Text(newVal ? 'تم تفعيل المنتج ✓' : 'تم إيقاف المنتج'),
         backgroundColor:
-            newValue ? AppColors.successGreen : AppColors.textSecondary,
+            newVal ? AppColors.successGreen : AppColors.textSecondary,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
       ));
@@ -428,18 +559,17 @@ class _ScannedProductSheetState extends State<_ScannedProductSheet> {
         padding: const EdgeInsets.all(24),
         child: _loading
             ? const Center(
-                child: CircularProgressIndicator(color: AppColors.accentOrange))
+                child:
+                    CircularProgressIndicator(color: AppColors.accentOrange))
             : _error != null
                 ? Column(mainAxisSize: MainAxisSize.min, children: [
                     const Icon(Icons.error_outline,
                         color: AppColors.errorRed, size: 48),
                     const SizedBox(height: 12),
-                    Text(
-                      'لم يُعثر على منتج بهذا الباركود',
-                      style: const TextStyle(
-                          color: AppColors.textPrimary, fontSize: 16),
-                      textAlign: TextAlign.center,
-                    ),
+                    const Text('لم يُعثر على منتج بهذا الباركود',
+                        style: TextStyle(
+                            color: AppColors.textPrimary, fontSize: 16),
+                        textAlign: TextAlign.center),
                     const SizedBox(height: 4),
                     Text(widget.barcode,
                         style: const TextStyle(
@@ -468,22 +598,16 @@ class _ProductDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isAvailable = product['is_available'] == true;
-    final stockQty =
-        (product['quantity_in_stock'] as num?)?.toInt() ?? 0;
-    final price =
-        (product['current_price'] as num?)?.toDouble() ?? 0.0;
+    final stockQty = (product['quantity_in_stock'] as num?)?.toInt() ?? 0;
+    final price = (product['current_price'] as num?)?.toDouble() ?? 0.0;
 
     return Column(mainAxisSize: MainAxisSize.min, children: [
-      // Handle
       Container(
-          width: 36,
-          height: 4,
+          width: 36, height: 4,
           decoration: BoxDecoration(
               color: AppColors.divider,
               borderRadius: BorderRadius.circular(2))),
       const SizedBox(height: 20),
-
-      // Status badge
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
@@ -492,29 +616,24 @@ class _ProductDetail extends StatelessWidget {
               : AppColors.errorRed.withOpacity(0.15),
           borderRadius: BorderRadius.circular(100),
           border: Border.all(
-            color: isAvailable ? AppColors.successGreen : AppColors.errorRed,
-          ),
+              color:
+                  isAvailable ? AppColors.successGreen : AppColors.errorRed),
         ),
         child: Text(
           isAvailable ? 'متاح للعملاء' : 'موقوف عن العملاء',
           style: TextStyle(
-            color: isAvailable ? AppColors.successGreen : AppColors.errorRed,
-            fontWeight: FontWeight.bold,
-            fontSize: 13,
-          ),
+              color: isAvailable ? AppColors.successGreen : AppColors.errorRed,
+              fontWeight: FontWeight.bold,
+              fontSize: 13),
         ),
       ),
       const SizedBox(height: 16),
-
-      // Name
-      Text(
-        product['name_ar'] ?? product['name_en'] ?? '—',
-        style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 20,
-            fontWeight: FontWeight.bold),
-        textAlign: TextAlign.center,
-      ),
+      Text(product['name_ar'] ?? product['name_en'] ?? '—',
+          style: const TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 20,
+              fontWeight: FontWeight.bold),
+          textAlign: TextAlign.center),
       const SizedBox(height: 4),
       if ((product['barcode'] ?? '').isNotEmpty)
         Text(product['barcode'],
@@ -522,25 +641,19 @@ class _ProductDetail extends StatelessWidget {
                 color: AppColors.textSecondary,
                 fontSize: 12,
                 fontFamily: 'Inter')),
-
       const SizedBox(height: 20),
-
-      // Info row
       Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
         _InfoTile(label: 'السعر', value: '${price.toStringAsFixed(1)} ج'),
         _InfoTile(
             label: 'المخزون',
             value: '$stockQty',
-            valueColor:
-                stockQty > 0 ? AppColors.successGreen : AppColors.errorRed),
+            valueColor: stockQty > 0
+                ? AppColors.successGreen
+                : AppColors.errorRed),
       ]),
-
       const SizedBox(height: 24),
-
-      // Toggle button
       SizedBox(
-        width: double.infinity,
-        height: 52,
+        width: double.infinity, height: 52,
         child: ElevatedButton.icon(
           onPressed: toggling ? null : onToggle,
           style: ElevatedButton.styleFrom(
@@ -553,8 +666,7 @@ class _ProductDetail extends StatelessWidget {
           ),
           icon: toggling
               ? const SizedBox(
-                  width: 18,
-                  height: 18,
+                  width: 18, height: 18,
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
               : Icon(isAvailable ? Icons.visibility_off : Icons.visibility),
@@ -569,8 +681,7 @@ class _ProductDetail extends StatelessWidget {
 }
 
 class _InfoTile extends StatelessWidget {
-  final String label;
-  final String value;
+  final String label, value;
   final Color valueColor;
   const _InfoTile(
       {required this.label,

@@ -634,7 +634,14 @@ class AgentToggleAvailabilityView(APIView):
 
 
 class AgentInventoryListView(APIView):
-    """GET /agent/inventory/products/ — all products for agent's store (active + inactive)."""
+    """GET /agent/inventory/products/ — paginated product list for the agent.
+
+    Query params:
+        q          — search (name_ar / name_en / barcode)
+        available  — 1 | 0
+        page       — 1-based page number (default 1)
+        limit      — page size (default 40, max 100)
+    """
     permission_classes = [permissions.IsAuthenticated, IsAgent]
 
     def get(self, request):
@@ -644,18 +651,31 @@ class AgentInventoryListView(APIView):
         if u.store_id:
             qs = qs.filter(store_id=u.store_id)
 
-        # Optional search
+        # Search
         q = request.query_params.get('q', '').strip()
         if q:
-            qs = qs.filter(name_ar__icontains=q) | qs.filter(name_en__icontains=q) | qs.filter(barcode__icontains=q)
+            qs = qs.filter(
+                DQ(name_ar__icontains=q) | DQ(name_en__icontains=q) | DQ(barcode__icontains=q)
+            )
 
-        # Optional filter by availability
+        # Availability filter
         available_param = request.query_params.get('available')
         if available_param is not None:
             qs = qs.filter(is_available=(available_param.lower() in ('1', 'true', 'yes')))
 
-        # Annotate with effective price (discount if active, else original).
-        # current_price is a @property on Product — use annotation for .values().
+        # Total count (before slicing)
+        total = qs.count()
+
+        # Pagination
+        try:
+            limit = min(int(request.query_params.get('limit', 40)), 100)
+            page  = max(int(request.query_params.get('page', 1)), 1)
+        except (ValueError, TypeError):
+            limit, page = 40, 1
+        offset = (page - 1) * limit
+        total_pages = max(1, (total + limit - 1) // limit)
+
+        # Annotate effective price
         now = timezone.now()
         qs = qs.annotate(
             current_price=Case(
@@ -670,20 +690,31 @@ class AgentInventoryListView(APIView):
             )
         )
 
-        products = list(qs.values(
+        products = list(qs[offset: offset + limit].values(
             'id', 'name_ar', 'name_en', 'barcode',
             'current_price', 'original_price',
             'is_available', 'quantity_in_stock',
             'is_weight_based',
         ))
 
-        # Convert UUID and Decimal to JSON-safe types
         for p in products:
             p['id'] = str(p['id'])
             p['current_price'] = float(p['current_price']) if p['current_price'] is not None else 0.0
             p['original_price'] = float(p['original_price']) if p['original_price'] is not None else 0.0
 
-        return ok(products)
+        return Response({
+            'success': True,
+            'data': products,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'totalPages': total_pages,
+                'hasMore': page < total_pages,
+            },
+            'message': '',
+            'errors': [],
+        })
 
 
 # ─── Action log ──────────────────────────────────────────────────────────────
