@@ -31,5 +31,5 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(Address)
 class AddressAdmin(admin.ModelAdmin):
-    list_display = ('user', 'label', 'city', 'is_default')
-    search_fields = ('user__phone', 'user__full_name', 'city')
+    list_display = ('user', 'label', 'full_address', 'is_default')
+    search_fields = ('user__phone', 'user__full_name', 'full_address')
