@@ -664,8 +664,16 @@ class AgentInventoryListView(APIView):
         if available_param is not None:
             qs = qs.filter(is_available=(available_param.lower() in ('1', 'true', 'yes')))
 
-        # Total count (before slicing)
-        total = qs.count()
+        # Total counts (before slicing) — use a single aggregation query
+        from django.db.models import Count, Sum
+        counts = qs.aggregate(
+            total=Count('id'),
+            total_available=Count('id', filter=DQ(is_available=True)),
+            total_active=Count('id', filter=DQ(is_active=True)),
+        )
+        total          = counts['total']
+        total_available = counts['total_available']
+        total_active    = counts['total_active']
 
         # Pagination
         try:
@@ -711,6 +719,8 @@ class AgentInventoryListView(APIView):
                 'page': page,
                 'limit': limit,
                 'total': total,
+                'totalAvailable': total_available,
+                'totalActive': total_active,
                 'totalPages': total_pages,
                 'hasMore': page < total_pages,
             },

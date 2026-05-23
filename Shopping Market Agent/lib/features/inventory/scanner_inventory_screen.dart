@@ -14,11 +14,15 @@ import 'product_detail_screen.dart';
 class _InventoryPage {
   final List<Map<String, dynamic>> items;
   final int total;
+  final int totalAvailable;
+  final int totalActive;
   final int totalPages;
   final bool hasMore;
   const _InventoryPage({
     required this.items,
     required this.total,
+    required this.totalAvailable,
+    required this.totalActive,
     required this.totalPages,
     required this.hasMore,
   });
@@ -40,6 +44,8 @@ Future<_InventoryPage> _fetchPage(String query, int page) async {
   return _InventoryPage(
     items: raw.map((e) => Map<String, dynamic>.from(e as Map)).toList(),
     total: (pag['total'] as int?) ?? raw.length,
+    totalAvailable: (pag['totalAvailable'] as int?) ?? 0,
+    totalActive: (pag['totalActive'] as int?) ?? 0,
     totalPages: (pag['totalPages'] as int?) ?? 1,
     hasMore: (pag['hasMore'] as bool?) ?? false,
   );
@@ -64,6 +70,8 @@ class _ScannerInventoryScreenState
   final List<Map<String, dynamic>> _products = [];
   int _page = 1;
   int _total = 0;
+  int _totalAvailable = 0;
+  int _totalActive = 0;
   bool _hasMore = true;
   bool _loadingFirst = true;
   bool _loadingMore = false;
@@ -113,6 +121,11 @@ class _ScannerInventoryScreenState
       setState(() {
         _products.addAll(result.items);
         _total = result.total;
+        // Counts only meaningful from first page (they don't change per page)
+        if (_page == 1) {
+          _totalAvailable = result.totalAvailable;
+          _totalActive = result.totalActive;
+        }
         _hasMore = result.hasMore;
         _page++;
         _loadingFirst = false;
@@ -185,9 +198,6 @@ class _ScannerInventoryScreenState
 
   @override
   Widget build(BuildContext context) {
-    final availableCount = _products.where((p) => p['is_available'] == true).length;
-    final activeCount = _products.where((p) => p['is_active'] != false).length;
-
     return Scaffold(
       backgroundColor: AppColors.backgroundPrimary,
       appBar: AppBar(
@@ -248,10 +258,10 @@ class _ScannerInventoryScreenState
                   onRetry: () => _loadPage(reset: true),
                 )
               : Column(children: [
-                  // Stats bar
+                  // Stats bar — uses real totals from API, not just loaded slice
                   _StatsBar(
-                    available: availableCount,
-                    active: activeCount,
+                    available: _totalAvailable,
+                    active: _totalActive,
                     total: _total,
                     loaded: _products.length,
                   ),
