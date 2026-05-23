@@ -1,4 +1,4 @@
-from django.db import migrations
+from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
@@ -6,9 +6,9 @@ class Migration(migrations.Migration):
     Adds is_active to both the main Product table and the
     django-simple-history mirror table.
 
-    Uses IF NOT EXISTS so this migration is safe to run even if the
-    columns were already added manually (e.g. via ALTER TABLE) and
-    will never crash on repeated docker restarts.
+    RunSQL with IF NOT EXISTS  →  safe to run even if columns already exist.
+    state_operations           →  keeps Django's migration state model in sync
+                                  so makemigrations never flags spurious changes.
     """
 
     dependencies = [
@@ -31,5 +31,17 @@ class Migration(migrations.Migration):
                 ALTER TABLE products_historicalproduct
                     DROP COLUMN IF EXISTS is_active;
             """,
+            state_operations=[
+                migrations.AddField(
+                    model_name='product',
+                    name='is_active',
+                    field=models.BooleanField(default=True),
+                ),
+                migrations.AddField(
+                    model_name='historicalproduct',
+                    name='is_active',
+                    field=models.BooleanField(default=True),
+                ),
+            ],
         ),
     ]
