@@ -68,7 +68,8 @@ export const userApi = {
   list: (params) => api.get('/auth/admin/users/', { params }),
   block: (id) => api.post(`/auth/admin/users/${id}/block/`),
   drivers: (params) => api.get('/auth/admin/users/', { params: { ...params, role: 'driver' } }),
-  createDriver: (data) => api.post('/auth/admin/drivers/create/', data),
+  createDriver: (data) => api.post('/auth/admin/staff/create/', { ...data, role: 'driver' }),
+  createStaff:  (data) => api.post('/auth/admin/staff/create/', data),
   liveDrivers: () => api.get('/auth/admin/drivers/live/'),
   settle: (driverId, data) => api.post(`/auth/admin/drivers/${driverId}/settle/`, data),
 };
