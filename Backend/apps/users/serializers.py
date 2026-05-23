@@ -24,7 +24,7 @@ class AddressSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     addresses = AddressSerializer(many=True, read_only=True)
     avatar_url = serializers.SerializerMethodField()
-    is_super_admin = serializers.BooleanField(source='is_super_admin', read_only=True)
+    is_super_admin = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
