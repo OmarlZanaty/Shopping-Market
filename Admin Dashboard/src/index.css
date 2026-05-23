@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Cairo', 'Inter', sans-serif;
+    background: #0F0F1A;
+    color: #FFFFFF;
+  }
+  body {
+    background: #12121F;
+    min-height: 100vh;
+  }
+  [dir="rtl"] {
+    font-family: 'Cairo', 'Inter', sans-serif;
+  }
+  /* English numerals always use Inter, regardless of locale. */
+  .font-money {
+    font-family: 'Inter', monospace;
+    font-feature-settings: "tnum";
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-orange hover:bg-orange-dark text-white font-bold rounded-btn
+           px-5 py-2.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply text-text hover:bg-card-hover rounded-btn px-3 py-2 transition-colors;
+  }
+  .btn-danger {
+    @apply bg-red hover:bg-red/90 text-white font-bold rounded-btn px-5 py-2.5;
+  }
+  .input-field {
+    @apply bg-input-bg border border-input-border rounded-btn px-4 py-2.5
+           text-text placeholder-muted focus:border-orange focus:outline-none
+           transition-colors w-full;
+  }
+  .card {
+    @apply bg-card rounded-card shadow-card p-5;
+  }
+  .badge {
+    @apply inline-block rounded-badge px-2 py-0.5 text-xs font-bold;
+  }
+}
+
+/* Scrollbar — slim, themed */
+.scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #3A3A4A;
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #FF6B35; }
