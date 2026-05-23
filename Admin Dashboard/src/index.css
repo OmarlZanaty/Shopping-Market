@@ -5,12 +5,16 @@
 @layer base {
   html {
     font-family: 'Cairo', 'Inter', sans-serif;
-    background: #0F0F1A;
-    color: #FFFFFF;
+    background: #F1F5F9;
+    color: #0D2440;
   }
   body {
-    background: #12121F;
+    background: #F1F5F9;
     min-height: 100vh;
+  }
+  /* inputs always show dark text regardless of surrounding theme */
+  input, textarea, select {
+    color: #0D2440;
   }
   [dir="rtl"] {
     font-family: 'Cairo', 'Inter', sans-serif;

@@ -34,18 +34,21 @@ export default function DriverFormPage() {
       navigate('/drivers');
     },
     onError: (e) => {
-      const msg = e.response?.data?.phone?.[0]
-        || e.response?.data?.message
-        || e.message
-        || t('حدث خطأ', 'An error occurred');
-      toast.error(msg);
+      const data = e.response?.data;
+      // Show first field-level error if present
+      const fieldErr = data?.errors?.[0]
+        || data?.phone?.[0]
+        || data?.password?.[0]
+        || data?.full_name?.[0];
+      const msg = fieldErr || data?.message || e.message || t('حدث خطأ', 'An error occurred');
+      toast.error(msg, { duration: 5000 });
     },
   });
 
   const inp = 'w-full border-2 border-gray-100 focus:border-[#2E5E99] rounded-xl px-4 py-2.5 text-sm outline-none transition-colors bg-white';
   const lbl = 'text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5';
 
-  const canSubmit = form.full_name && form.phone && form.password && form.password === form.confirm_password;
+  const canSubmit = form.full_name && form.phone && form.password.length >= 8 && form.password === form.confirm_password;
 
   return (
     <div className="p-6 max-w-xl mx-auto">
@@ -111,10 +114,14 @@ export default function DriverFormPage() {
         {/* Password */}
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className={lbl}>{t('كلمة المرور', 'Password')} *</label>
+            <label className={lbl}>{t('كلمة المرور', 'Password')} * <span className="text-gray-400 normal-case font-normal">{t('(8 أحرف على الأقل)', '(min 8 chars)')}</span></label>
             <input type="password" value={form.password}
               onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-              placeholder="••••••••" className={inp} />
+              placeholder="••••••••"
+              className={`${inp} ${form.password && form.password.length < 8 ? 'border-red-400' : ''}`} />
+            {form.password && form.password.length < 8 && (
+              <p className="text-xs text-red-500 mt-1">{t('يجب أن تكون 8 أحرف على الأقل', 'Must be at least 8 characters')}</p>
+            )}
           </div>
           <div>
             <label className={lbl}>{t('تأكيد المرور', 'Confirm Password')} *</label>
