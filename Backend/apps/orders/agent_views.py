@@ -638,6 +638,7 @@ class AgentInventoryListView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAgent]
 
     def get(self, request):
+        from django.db.models import Case, When, F, DecimalField, Q as DQ
         u = request.user
         qs = Product.objects.all().order_by('name_ar')
         if u.store_id:
@@ -653,13 +654,36 @@ class AgentInventoryListView(APIView):
         if available_param is not None:
             qs = qs.filter(is_available=(available_param.lower() in ('1', 'true', 'yes')))
 
-        products = qs.values(
+        # Annotate with effective price (discount if active, else original).
+        # current_price is a @property on Product — use annotation for .values().
+        now = timezone.now()
+        qs = qs.annotate(
+            current_price=Case(
+                When(
+                    DQ(discount_price__isnull=False)
+                    & (DQ(discount_start__isnull=True) | DQ(discount_start__lte=now))
+                    & (DQ(discount_end__isnull=True) | DQ(discount_end__gte=now)),
+                    then=F('discount_price'),
+                ),
+                default=F('original_price'),
+                output_field=DecimalField(max_digits=10, decimal_places=2),
+            )
+        )
+
+        products = list(qs.values(
             'id', 'name_ar', 'name_en', 'barcode',
             'current_price', 'original_price',
             'is_available', 'quantity_in_stock',
             'is_weight_based',
-        )
-        return ok(list(products))
+        ))
+
+        # Convert UUID and Decimal to JSON-safe types
+        for p in products:
+            p['id'] = str(p['id'])
+            p['current_price'] = float(p['current_price']) if p['current_price'] is not None else 0.0
+            p['original_price'] = float(p['original_price']) if p['original_price'] is not None else 0.0
+
+        return ok(products)
 
 
 # ─── Action log ──────────────────────────────────────────────────────────────
