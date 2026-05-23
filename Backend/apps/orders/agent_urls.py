@@ -32,6 +32,7 @@ urlpatterns = [
 
     # Inventory
     path('inventory/products/', v.AgentInventoryListView.as_view(), name='agent-inventory-products'),
+    path('inventory/products/<uuid:product_id>/', v.AgentProductDetailView.as_view(), name='agent-inventory-product-detail'),
     path('inventory/scan/<str:barcode>/', v.AgentInventoryScanView.as_view(), name='agent-inventory-scan'),
     path('inventory/mark-available/<uuid:product_id>/', v.AgentMarkAvailableView.as_view(),
          name='agent-inventory-mark-available'),

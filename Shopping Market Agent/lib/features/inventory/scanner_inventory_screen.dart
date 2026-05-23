@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/network/dio_client.dart';
-import '../../core/network/api_envelope.dart';
 import '../../core/constants/api_constants.dart';
 import '../orders/data/orders_api.dart';
 import '../scanner/barcode_scanner_screen.dart';
+import 'product_detail_screen.dart';
 
 // ─── Data / API ───────────────────────────────────────────────────────────────
 
@@ -136,29 +137,16 @@ class _ScannerInventoryScreenState
     _loadPage(reset: true);
   }
 
-  // ── Toggle ────────────────────────────────────────────────────────────────
+  // ── Open product detail ───────────────────────────────────────────────────
 
-  Future<void> _toggle(int index) async {
-    final p = _products[index];
-    final pid = p['id'].toString();
-    try {
-      final newVal = await OrdersApi().toggleAvailability(pid);
-      if (!mounted) return;
-      setState(() => _products[index] = {...p, 'is_available': newVal});
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(newVal ? 'تم تفعيل المنتج ✓' : 'تم إيقاف المنتج'),
-        backgroundColor:
-            newVal ? AppColors.successGreen : AppColors.textSecondary,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('خطأ: $e'),
-        backgroundColor: AppColors.errorRed,
-        behavior: SnackBarBehavior.floating,
-      ));
+  Future<void> _openDetail(int index) async {
+    final updated = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => ProductDetailScreen(product: _products[index]),
+      ),
+    );
+    if (updated != null && mounted) {
+      setState(() => _products[index] = {..._products[index], ...updated});
     }
   }
 
@@ -175,6 +163,7 @@ class _ScannerInventoryScreenState
   void _showScannedProduct(String barcode) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppColors.backgroundSecondary,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -182,10 +171,10 @@ class _ScannerInventoryScreenState
       builder: (_) => _ScannedProductSheet(
         barcode: barcode,
         onToggled: (pid, newVal) {
-          // Update the product in the loaded list if it's visible
           final idx = _products.indexWhere((p) => p['id'].toString() == pid);
           if (idx != -1) {
-            setState(() => _products[idx] = {..._products[idx], 'is_available': newVal});
+            setState(() =>
+                _products[idx] = {..._products[idx], 'is_available': newVal});
           }
         },
       ),
@@ -196,7 +185,8 @@ class _ScannerInventoryScreenState
 
   @override
   Widget build(BuildContext context) {
-    final activeCount = _products.where((p) => p['is_available'] == true).length;
+    final availableCount = _products.where((p) => p['is_available'] == true).length;
+    final activeCount = _products.where((p) => p['is_active'] != false).length;
 
     return Scaffold(
       backgroundColor: AppColors.backgroundPrimary,
@@ -214,8 +204,8 @@ class _ScannerInventoryScreenState
               style: const TextStyle(color: AppColors.textPrimary),
               decoration: InputDecoration(
                 hintText: 'بحث باسم المنتج أو الباركود...',
-                hintStyle: const TextStyle(
-                    color: AppColors.textSecondary, fontSize: 13),
+                hintStyle:
+                    const TextStyle(color: AppColors.textSecondary, fontSize: 13),
                 filled: true,
                 fillColor: AppColors.backgroundSecondary,
                 prefixIcon: const Icon(Icons.search,
@@ -250,7 +240,8 @@ class _ScannerInventoryScreenState
       ),
       body: _loadingFirst
           ? const Center(
-              child: CircularProgressIndicator(color: AppColors.accentOrange))
+              child:
+                  CircularProgressIndicator(color: AppColors.accentOrange))
           : _error != null && _products.isEmpty
               ? _ErrorView(
                   message: _error!,
@@ -259,13 +250,13 @@ class _ScannerInventoryScreenState
               : Column(children: [
                   // Stats bar
                   _StatsBar(
+                    available: availableCount,
                     active: activeCount,
-                    inactive: _products.length - activeCount,
                     total: _total,
                     loaded: _products.length,
                   ),
 
-                  // Product list
+                  // Product grid
                   Expanded(
                     child: RefreshIndicator(
                       color: AppColors.accentOrange,
@@ -286,26 +277,33 @@ class _ScannerInventoryScreenState
                                 ),
                               ),
                             ])
-                          : ListView.builder(
+                          : GridView.builder(
                               controller: _scrollCtrl,
-                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                crossAxisSpacing: 10,
+                                mainAxisSpacing: 10,
+                                childAspectRatio: 0.70,
+                              ),
                               itemCount:
                                   _products.length + (_hasMore ? 1 : 0),
                               itemBuilder: (_, i) {
                                 if (i == _products.length) {
-                                  return const Padding(
-                                    padding: EdgeInsets.all(16),
-                                    child: Center(
+                                  return const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16),
                                       child: CircularProgressIndicator(
                                           color: AppColors.accentOrange,
                                           strokeWidth: 2),
                                     ),
                                   );
                                 }
-                                return _ProductRow(
+                                return _ProductGridCard(
                                   key: ValueKey(_products[i]['id']),
                                   product: _products[i],
-                                  onToggle: () => _toggle(i),
+                                  onTap: () => _openDetail(i),
                                 );
                               },
                             ),
@@ -319,30 +317,30 @@ class _ScannerInventoryScreenState
 // ─── Stats bar ────────────────────────────────────────────────────────────────
 
 class _StatsBar extends StatelessWidget {
-  final int active, inactive, total, loaded;
-  const _StatsBar(
-      {required this.active,
-      required this.inactive,
-      required this.total,
-      required this.loaded});
+  final int available, active, total, loaded;
+  const _StatsBar({
+    required this.available,
+    required this.active,
+    required this.total,
+    required this.loaded,
+  });
 
   @override
   Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: AppColors.backgroundSecondary,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-          _Chip(label: 'نشط', value: '$active', color: AppColors.successGreen),
+          _Chip(label: 'متاح', value: '$available', color: AppColors.successGreen),
           Container(width: 1, height: 28, color: AppColors.divider),
-          _Chip(label: 'موقوف', value: '$inactive', color: AppColors.errorRed),
+          _Chip(label: 'نشط', value: '$active', color: AppColors.infoBlue),
           Container(width: 1, height: 28, color: AppColors.divider),
-          _Chip(
-              label: 'الإجمالي',
-              value: '$total',
-              color: AppColors.textSecondary),
+          _Chip(label: 'محمّل', value: '$loaded', color: AppColors.accentOrange),
+          Container(width: 1, height: 28, color: AppColors.divider),
+          _Chip(label: 'الكل', value: '$total', color: AppColors.textSecondary),
         ]),
       );
 }
@@ -350,17 +348,16 @@ class _StatsBar extends StatelessWidget {
 class _Chip extends StatelessWidget {
   final String label, value;
   final Color color;
-  const _Chip(
-      {required this.label, required this.value, required this.color});
+  const _Chip({required this.label, required this.value, required this.color});
 
   @override
   Widget build(BuildContext context) => Column(children: [
         Text(value,
             style: TextStyle(
-                color: color, fontSize: 17, fontWeight: FontWeight.bold)),
+                color: color, fontSize: 16, fontWeight: FontWeight.bold)),
         Text(label,
             style: const TextStyle(
-                color: AppColors.textSecondary, fontSize: 11)),
+                color: AppColors.textSecondary, fontSize: 10)),
       ]);
 }
 
@@ -381,8 +378,7 @@ class _ErrorView extends StatelessWidget {
             const SizedBox(height: 12),
             Text(message,
                 textAlign: TextAlign.center,
-                style:
-                    const TextStyle(color: AppColors.textSecondary)),
+                style: const TextStyle(color: AppColors.textSecondary)),
             const SizedBox(height: 12),
             ElevatedButton(
               onPressed: onRetry,
@@ -395,100 +391,190 @@ class _ErrorView extends StatelessWidget {
       );
 }
 
-// ─── Product row ──────────────────────────────────────────────────────────────
+// ─── Product grid card ────────────────────────────────────────────────────────
 
-class _ProductRow extends StatefulWidget {
+class _ProductGridCard extends StatelessWidget {
   final Map<String, dynamic> product;
-  final VoidCallback onToggle;
-  const _ProductRow({super.key, required this.product, required this.onToggle});
-
-  @override
-  State<_ProductRow> createState() => _ProductRowState();
-}
-
-class _ProductRowState extends State<_ProductRow> {
-  bool _loading = false;
+  final VoidCallback onTap;
+  const _ProductGridCard({super.key, required this.product, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final p = widget.product;
-    final isAvailable = p['is_available'] == true;
-    final stockQty = (p['quantity_in_stock'] as num?)?.toInt() ?? 0;
-    final price = (p['current_price'] as num?)?.toDouble() ?? 0.0;
+    final isAvailable = product['is_available'] == true;
+    final isActive = product['is_active'] != false; // default true if missing
+    final price = (product['current_price'] as num?)?.toDouble() ?? 0.0;
+    final name = (product['name_ar'] ?? product['name_en'] ?? '—') as String;
+    final imageUrl = (product['image_url'] ?? '') as String;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: AppColors.backgroundSecondary,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isAvailable
-              ? AppColors.successGreen.withOpacity(0.25)
-              : AppColors.divider,
-        ),
-      ),
-      child: ListTile(
-        dense: true,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        leading: Icon(
-          isAvailable ? Icons.check_circle : Icons.cancel_outlined,
-          color: isAvailable
-              ? AppColors.successGreen
-              : AppColors.textSecondary,
-          size: 22,
-        ),
-        title: Text(
-          p['name_ar'] ?? p['name_en'] ?? '—',
-          style: TextStyle(
-            color:
-                isAvailable ? AppColors.textPrimary : AppColors.textSecondary,
-            fontWeight: FontWeight.w600,
-            fontSize: 13,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.backgroundSecondary,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: !isActive
+                ? AppColors.errorRed.withOpacity(0.5)
+                : isAvailable
+                    ? AppColors.successGreen.withOpacity(0.3)
+                    : AppColors.divider,
+            width: 1.2,
           ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
         ),
-        subtitle: Row(children: [
-          if (price > 0)
-            Text('${price.toStringAsFixed(1)} ج',
-                style: const TextStyle(
-                    color: AppColors.accentOrange,
-                    fontSize: 11,
-                    fontFamily: 'Inter')),
-          if (price > 0) const SizedBox(width: 8),
-          Text(
-            stockQty > 0 ? 'مخزون: $stockQty' : 'نفذ',
-            style: TextStyle(
-                color: stockQty > 0
-                    ? AppColors.textSecondary
-                    : AppColors.errorRed,
-                fontSize: 11),
-          ),
-        ]),
-        trailing: _loading
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: AppColors.accentOrange))
-            : Switch(
-                value: isAvailable,
-                activeColor: AppColors.successGreen,
-                inactiveThumbColor: AppColors.textSecondary,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                onChanged: (_) async {
-                  setState(() => _loading = true);
-                  try {
-                    widget.onToggle();
-                  } finally {
-                    if (mounted) setState(() => _loading = false);
-                  }
-                },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image area
+            Expanded(
+              flex: 5,
+              child: ClipRRect(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(13)),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    imageUrl.isNotEmpty
+                        ? CachedNetworkImage(
+                            imageUrl: imageUrl,
+                            fit: BoxFit.cover,
+                            errorWidget: (_, __, ___) =>
+                                _PlaceholderImage(name: name),
+                            placeholder: (_, __) => Container(
+                              color: AppColors.backgroundPrimary,
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 1.5,
+                                    color: AppColors.textSecondary),
+                              ),
+                            ),
+                          )
+                        : _PlaceholderImage(name: name),
+                    // "مخفي" overlay when not active
+                    if (!isActive)
+                      Container(
+                        color: Colors.black54,
+                        alignment: Alignment.center,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.errorRed,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text('مخفي',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                  ],
+                ),
               ),
+            ),
+
+            // Info area
+            Expanded(
+              flex: 4,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: TextStyle(
+                        color: isActive
+                            ? AppColors.textPrimary
+                            : AppColors.textSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const Spacer(),
+                    if (price > 0)
+                      Text(
+                        '${price.toStringAsFixed(1)} ج',
+                        style: const TextStyle(
+                          color: AppColors.accentOrange,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Inter',
+                        ),
+                      ),
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      _StatusDot(
+                        label: isAvailable ? 'متاح' : 'نفذ',
+                        color: isAvailable
+                            ? AppColors.successGreen
+                            : AppColors.errorRed,
+                      ),
+                      const SizedBox(width: 4),
+                      _StatusDot(
+                        label: isActive ? 'نشط' : 'مخفي',
+                        color: isActive
+                            ? AppColors.infoBlue
+                            : AppColors.textSecondary,
+                      ),
+                    ]),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
+}
+
+class _PlaceholderImage extends StatelessWidget {
+  final String name;
+  const _PlaceholderImage({required this.name});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: AppColors.backgroundPrimary,
+        alignment: Alignment.center,
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Icon(Icons.inventory_2_outlined,
+              color: AppColors.textSecondary, size: 36),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              name.length > 20 ? name.substring(0, 20) : name,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style:
+                  const TextStyle(color: AppColors.textSecondary, fontSize: 10),
+            ),
+          ),
+        ]),
+      );
+}
+
+class _StatusDot extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _StatusDot({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                color: color, fontSize: 9, fontWeight: FontWeight.w600)),
+      );
 }
 
 // ─── Scanned product bottom sheet ────────────────────────────────────────────
@@ -520,8 +606,7 @@ class _ScannedProductSheetState extends State<_ScannedProductSheet> {
       final data = await OrdersApi().inventoryScan(widget.barcode);
       if (mounted) setState(() { _product = data; _loading = false; });
     } catch (e) {
-      if (mounted)
-        setState(() { _error = e.toString(); _loading = false; });
+      if (mounted) setState(() { _error = e.toString(); _loading = false; });
     }
   }
 
@@ -576,7 +661,7 @@ class _ScannedProductSheetState extends State<_ScannedProductSheet> {
                             color: AppColors.textSecondary,
                             fontFamily: 'Inter')),
                   ])
-                : _ProductDetail(
+                : _ProductSheetDetail(
                     product: _product!,
                     onToggle: _toggle,
                     toggling: _toggling,
@@ -586,14 +671,12 @@ class _ScannedProductSheetState extends State<_ScannedProductSheet> {
   }
 }
 
-class _ProductDetail extends StatelessWidget {
+class _ProductSheetDetail extends StatelessWidget {
   final Map<String, dynamic> product;
   final VoidCallback onToggle;
   final bool toggling;
-  const _ProductDetail(
-      {required this.product,
-      required this.onToggle,
-      required this.toggling});
+  const _ProductSheetDetail(
+      {required this.product, required this.onToggle, required this.toggling});
 
   @override
   Widget build(BuildContext context) {
@@ -616,8 +699,7 @@ class _ProductDetail extends StatelessWidget {
               : AppColors.errorRed.withOpacity(0.15),
           borderRadius: BorderRadius.circular(100),
           border: Border.all(
-              color:
-                  isAvailable ? AppColors.successGreen : AppColors.errorRed),
+              color: isAvailable ? AppColors.successGreen : AppColors.errorRed),
         ),
         child: Text(
           isAvailable ? 'متاح للعملاء' : 'موقوف عن العملاء',
@@ -635,8 +717,8 @@ class _ProductDetail extends StatelessWidget {
               fontWeight: FontWeight.bold),
           textAlign: TextAlign.center),
       const SizedBox(height: 4),
-      if ((product['barcode'] ?? '').isNotEmpty)
-        Text(product['barcode'],
+      if ((product['barcode'] ?? '').toString().isNotEmpty)
+        Text(product['barcode'].toString(),
             style: const TextStyle(
                 color: AppColors.textSecondary,
                 fontSize: 12,

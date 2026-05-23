@@ -46,7 +46,7 @@ class ProductListView(generics.ListAPIView):
     ordering_fields = ['original_price', 'name_en', 'created_at']
 
     def get_queryset(self):
-        qs = Product.objects.filter(is_available=True).select_related('store').prefetch_related(
+        qs = Product.objects.filter(is_available=True, is_active=True).select_related('store').prefetch_related(
             'categories', 'images'
         )
         qs = _expire_discounts(qs)
@@ -114,7 +114,7 @@ class SearchSuggestionsView(APIView):
         q = (request.query_params.get('q') or request.query_params.get('search') or '').strip()
         if len(q) < 1:
             return ok([])
-        qs = Product.objects.filter(is_available=True)
+        qs = Product.objects.filter(is_available=True, is_active=True)
         qs = _filter_store(qs, request)
         qs = qs.filter(
             Q(name_ar__istartswith=q) | Q(name_en__istartswith=q) |
@@ -130,7 +130,7 @@ class ProductSearchView(generics.ListAPIView):
 
     def get_queryset(self):
         q = (self.request.query_params.get('q') or self.request.query_params.get('search') or '').strip()
-        qs = Product.objects.filter(is_available=True)
+        qs = Product.objects.filter(is_available=True, is_active=True)
         qs = _filter_store(qs, self.request)
         if q:
             qs = qs.filter(
@@ -169,7 +169,7 @@ class CategoryProductsView(generics.ListAPIView):
     def get_queryset(self):
         cat_id = self.kwargs['pk']
         return (
-            Product.objects.filter(is_available=True, categories__id=cat_id)
+            Product.objects.filter(is_available=True, is_active=True, categories__id=cat_id)
             .prefetch_related('categories', 'images')
         )
 

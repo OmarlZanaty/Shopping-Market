@@ -694,14 +694,15 @@ class AgentInventoryListView(APIView):
         products = list(qs[offset: offset + limit].values(
             'id', 'name_ar', 'name_en', 'barcode',
             'current_price', 'original_price',
-            'is_available', 'quantity_in_stock',
-            'is_weight_based',
+            'is_available', 'is_active', 'quantity_in_stock',
+            'is_weight_based', 'image_url_s3', 'thumbnail_url',
         ))
 
         for p in products:
             p['id'] = str(p['id'])
             p['current_price'] = float(p['current_price']) if p['current_price'] is not None else 0.0
             p['original_price'] = float(p['original_price']) if p['original_price'] is not None else 0.0
+            p['image_url'] = p.pop('image_url_s3') or p.pop('thumbnail_url', '') or ''
 
         return Response({
             'success': True,
@@ -715,6 +716,128 @@ class AgentInventoryListView(APIView):
             },
             'message': '',
             'errors': [],
+        })
+
+
+class AgentProductDetailView(APIView):
+    """GET/PATCH /agent/inventory/products/<product_id>/ — full product detail + edit."""
+    permission_classes = [permissions.IsAuthenticated, IsAgent]
+
+    def _get_product(self, request, product_id):
+        u = request.user
+        qs = Product.objects.all()
+        if u.store_id:
+            qs = qs.filter(store_id=u.store_id)
+        return qs.filter(pk=product_id).first()
+
+    def get(self, request, product_id):
+        product = self._get_product(request, product_id)
+        if not product:
+            return fail('Product not found', status_code=404)
+
+        # Build image URL
+        image_url = product.image_url_s3 or product.thumbnail_url or ''
+        if not image_url and product.main_image:
+            try:
+                image_url = request.build_absolute_uri(product.main_image.url)
+            except Exception:
+                image_url = ''
+
+        cats = list(product.categories.values('id', 'name_ar', 'name_en'))
+
+        return ok({
+            'id': str(product.id),
+            'barcode': product.barcode or '',
+            'name_ar': product.name_ar,
+            'name_en': product.name_en,
+            'description_ar': product.description_ar,
+            'description_en': product.description_en,
+            'original_price': float(product.original_price),
+            'discount_price': float(product.discount_price) if product.discount_price else None,
+            'current_price': float(product.current_price),
+            'quantity_in_stock': product.quantity_in_stock,
+            'low_stock_threshold': product.low_stock_threshold,
+            'is_available': product.is_available,
+            'is_active': product.is_active,
+            'is_featured': product.is_featured,
+            'is_weight_based': product.is_weight_based,
+            'sell_unit': product.sell_unit,
+            'image_url': image_url,
+            'categories': cats,
+        })
+
+    def patch(self, request, product_id):
+        product = self._get_product(request, product_id)
+        if not product:
+            return fail('Product not found', status_code=404)
+
+        data = request.data
+        update_fields = []
+
+        for field in ('name_ar', 'name_en', 'description_ar', 'description_en', 'barcode', 'sell_unit'):
+            if field in data:
+                setattr(product, field, data[field])
+                update_fields.append(field)
+
+        if 'original_price' in data:
+            try:
+                product.original_price = float(data['original_price'])
+                update_fields.append('original_price')
+            except (ValueError, TypeError):
+                pass
+
+        if 'discount_price' in data:
+            val = data['discount_price']
+            product.discount_price = float(val) if val and str(val).strip() else None
+            update_fields.append('discount_price')
+
+        if 'quantity_in_stock' in data:
+            try:
+                product.quantity_in_stock = int(data['quantity_in_stock'])
+                update_fields.append('quantity_in_stock')
+            except (ValueError, TypeError):
+                pass
+
+        if 'low_stock_threshold' in data:
+            try:
+                product.low_stock_threshold = int(data['low_stock_threshold'])
+                update_fields.append('low_stock_threshold')
+            except (ValueError, TypeError):
+                pass
+
+        for bool_field in ('is_available', 'is_active', 'is_featured', 'is_weight_based'):
+            if bool_field in data:
+                val = data[bool_field]
+                if isinstance(val, bool):
+                    setattr(product, bool_field, val)
+                else:
+                    setattr(product, bool_field, str(val).lower() in ('true', '1', 'yes'))
+                update_fields.append(bool_field)
+
+        if 'image_url' in data:
+            product.image_url_s3 = data['image_url'] or ''
+            update_fields.append('image_url_s3')
+
+        if 'main_image' in request.FILES:
+            product.main_image = request.FILES['main_image']
+            update_fields.append('main_image')
+
+        if update_fields:
+            product.save(update_fields=update_fields)
+
+        # Notify waitlist if just turned available
+        if 'is_available' in update_fields and product.is_available:
+            try:
+                from .tasks import notify_stock_waitlist
+                notify_stock_waitlist.delay(str(product.id))
+            except Exception:
+                pass
+
+        return ok({
+            'id': str(product.id),
+            'updated_fields': update_fields,
+            'is_available': product.is_available,
+            'is_active': product.is_active,
         })
 
 

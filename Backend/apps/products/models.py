@@ -92,6 +92,7 @@ class Product(models.Model):
 
     # Status
     is_available = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)   # False = hidden from customer app
     is_featured = models.BooleanField(default=False)
 
     # Media

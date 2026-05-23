@@ -53,6 +53,7 @@ class ApiConstants {
 
   // Inventory
   static const String inventoryProducts              =  '/agent/inventory/products/';
+  static String inventoryProductDetail(String pid)   => '/agent/inventory/products/$pid/';
   static String inventoryScan(String barcode)        => '/agent/inventory/scan/$barcode/';
   static String inventoryMarkAvailable(String pid)   => '/agent/inventory/mark-available/$pid/';
   static String inventoryToggle(String pid)          => '/agent/inventory/toggle/$pid/';
