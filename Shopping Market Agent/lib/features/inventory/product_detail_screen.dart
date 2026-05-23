@@ -202,44 +202,53 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     if (_saving) return;
     setState(() => _saving = true);
     try {
-      final FormData formData;
-      final Map<String, dynamic> fields = {
-        'name_ar': _nameArCtrl.text.trim(),
-        'name_en': _nameEnCtrl.text.trim(),
-        'original_price': _priceCtrl.text.trim(),
-        'quantity_in_stock': _stockCtrl.text.trim(),
-        'is_available': _isAvailable.toString(),
-        'is_active': _isActive.toString(),
-        'is_featured': _isFeatured.toString(),
-        'is_weight_based': _isWeightBased.toString(),
-        'description_ar': _descArCtrl.text.trim(),
-      };
-
       final discountText = _discountCtrl.text.trim();
-      if (discountText.isNotEmpty) {
-        fields['discount_price'] = discountText;
-      } else {
-        fields['discount_price'] = '';
-      }
+      final String? discountPrice =
+          discountText.isNotEmpty ? discountText : null;
 
       if (_pickedImage != null) {
-        formData = FormData.fromMap({
-          ...fields,
+        // Has image → multipart
+        final formData = FormData.fromMap({
+          'name_ar': _nameArCtrl.text.trim(),
+          'name_en': _nameEnCtrl.text.trim(),
+          'original_price': _priceCtrl.text.trim(),
+          'quantity_in_stock': _stockCtrl.text.trim(),
+          'is_available': _isAvailable.toString(),
+          'is_active': _isActive.toString(),
+          'is_featured': _isFeatured.toString(),
+          'is_weight_based': _isWeightBased.toString(),
+          'description_ar': _descArCtrl.text.trim(),
+          if (discountPrice != null) 'discount_price': discountPrice,
           'main_image': await MultipartFile.fromFile(
             _pickedImage!.path,
             filename: 'product_${_data['id']}.jpg',
           ),
         });
+        await DioClient.I.dio.patch(
+          ApiConstants.inventoryProductDetail(_data['id'].toString()),
+          data: formData,
+          options: Options(contentType: 'multipart/form-data'),
+        );
       } else {
-        if (_imageUrl.isEmpty) fields['image_url'] = '';
-        formData = FormData.fromMap(fields);
+        // No image → clean JSON
+        final body = <String, dynamic>{
+          'name_ar': _nameArCtrl.text.trim(),
+          'name_en': _nameEnCtrl.text.trim(),
+          'original_price': double.tryParse(_priceCtrl.text.trim()) ?? 0.0,
+          'quantity_in_stock': int.tryParse(_stockCtrl.text.trim()) ?? 0,
+          'is_available': _isAvailable,
+          'is_active': _isActive,
+          'is_featured': _isFeatured,
+          'is_weight_based': _isWeightBased,
+          'description_ar': _descArCtrl.text.trim(),
+          'discount_price': discountPrice,
+          'image_url': _imageUrl,
+        };
+        await DioClient.I.dio.patch(
+          ApiConstants.inventoryProductDetail(_data['id'].toString()),
+          data: body,
+        );
       }
-
-      await DioClient.I.dio.patch(
-        ApiConstants.inventoryProductDetail(_data['id'].toString()),
-        data: formData,
-        options: Options(contentType: 'multipart/form-data'),
-      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

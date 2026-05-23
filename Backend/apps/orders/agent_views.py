@@ -833,7 +833,11 @@ class AgentProductDetailView(APIView):
             update_fields.append('main_image')
 
         if update_fields:
-            product.save(update_fields=update_fields)
+            try:
+                product.save(update_fields=update_fields)
+            except Exception as exc:
+                import traceback as _tb
+                return fail(f'Save failed: {exc}\n{_tb.format_exc()}', status_code=500)
 
         # Notify waitlist if just turned available
         if 'is_available' in update_fields and product.is_available:
