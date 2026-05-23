@@ -31,13 +31,11 @@ class Command(BaseCommand):
         with open(data_file, encoding='utf-8') as f:
             data = json.load(f)
 
-        categories_data = data['categories']   # [{sort_order, name_ar}, …]
-        products_data   = data['products']     # [{barcode, name_ar, category, price}, …]
+        categories_data = data['categories']
+        products_data   = data['products']
 
         # ── Resolve default store ─────────────────────────────────────────────
-        store = Store.objects.filter(name_en='Shopping Market').first()
-        if not store:
-            store = Store.objects.first()
+        store = Store.objects.filter(name_en='Shopping Market').first() or Store.objects.first()
         if not store:
             self.stderr.write(self.style.ERROR(
                 'No store found. Run `python manage.py seed_default_store` first.'
@@ -46,16 +44,15 @@ class Command(BaseCommand):
         self.stdout.write(f'Using store: {store.name_en} (id={store.id})')
 
         with transaction.atomic():
+
             # ── Optional clear ────────────────────────────────────────────────
             if options['clear']:
-                deleted_p, _ = Product.objects.filter(store=store).delete()
-                deleted_c, _ = Category.objects.filter(store=store).delete()
-                self.stdout.write(
-                    self.style.WARNING(f'Cleared {deleted_c} categories, {deleted_p} products')
-                )
+                dp, _ = Product.objects.filter(store=store).delete()
+                dc, _ = Category.objects.filter(store=store).delete()
+                self.stdout.write(self.style.WARNING(f'Cleared {dc} categories, {dp} products'))
 
             # ── Seed categories ───────────────────────────────────────────────
-            cat_map = {}   # name_ar → Category instance
+            cat_map = {}
             cat_created = 0
             for c in categories_data:
                 name_ar = c['name_ar']
@@ -63,7 +60,7 @@ class Command(BaseCommand):
                     store=store,
                     name_ar=name_ar,
                     defaults={
-                        'name_en': name_ar,   # use Arabic as fallback English name
+                        'name_en': name_ar,
                         'sort_order': c['sort_order'],
                         'is_active': True,
                         'is_visible': True,
@@ -73,121 +70,93 @@ class Command(BaseCommand):
                 if created:
                     cat_created += 1
 
-            self.stdout.write(
-                self.style.SUCCESS(f'✓ Categories: {cat_created} created, {len(categories_data) - cat_created} already existed')
-            )
+            self.stdout.write(self.style.SUCCESS(
+                f'✓ Categories: {cat_created} created, {len(categories_data) - cat_created} already existed'
+            ))
 
-            # ── Seed products ─────────────────────────────────────────────────
-            prod_created = 0
-            prod_updated = 0
-            prod_skipped = 0
-            unknown_cats  = set()
-
+            # ── Seed products (bulk_create in batches of 500) ─────────────────
             BATCH = 500
-            to_create = []
-            to_update_ids = []
+            batch = []
+            prod_created = 0
+            prod_skipped = 0
+
+            # Pre-fetch existing barcodes to skip duplicates
+            existing_barcodes = set(
+                Product.objects.filter(store=store).values_list('barcode', flat=True)
+            )
 
             for p in products_data:
                 barcode  = p['barcode']
                 name_ar  = p['name_ar']
                 cat_name = p['category']
-                price    = p['price'] or 0.0
+                price    = float(p['price']) if p['price'] else 0.0
 
-                category = cat_map.get(cat_name)
-                if category is None:
-                    # Category referenced in products but not in category sheet —
-                    # create it on the fly.
-                    unknown_cats.add(cat_name)
-                    category, _ = Category.objects.get_or_create(
-                        store=store,
-                        name_ar=cat_name,
-                        defaults={'name_en': cat_name, 'is_active': True, 'is_visible': True},
-                    )
-                    cat_map[cat_name] = category
-
-                existing = Product.objects.filter(barcode=barcode).first()
-                if existing:
-                    # Update price if it has a real value and product has 0
-                    if price > 0 and existing.original_price == 0:
-                        existing.original_price = price
-                        existing.save(update_fields=['original_price'])
-                        prod_updated += 1
-                    else:
-                        prod_skipped += 1
+                if barcode in existing_barcodes:
+                    prod_skipped += 1
                     continue
 
-                # Determine if weight-based (fresh produce, deli items have price=0)
-                is_weight = price == 0
+                # Auto-create any category that appears in products but not in sheet
+                if cat_name not in cat_map:
+                    obj, _ = Category.objects.get_or_create(
+                        store=store, name_ar=cat_name,
+                        defaults={'name_en': cat_name, 'is_active': True, 'is_visible': True},
+                    )
+                    cat_map[cat_name] = obj
 
-                to_create.append(Product(
+                batch.append(Product(
                     store=store,
                     barcode=barcode,
                     name_ar=name_ar,
-                    name_en=name_ar,          # English name = Arabic until translated
+                    name_en=name_ar,
                     original_price=price,
                     is_available=True,
-                    is_weight_based=is_weight,
-                    quantity_in_stock=999 if not is_weight else 0,
+                    is_weight_based=(price == 0),
+                    quantity_in_stock=0 if price == 0 else 999,
                 ))
-                # Attach category after bulk_create (M2M needs PKs)
-                # We'll save the mapping as (barcode, cat_name) and wire after bulk
-                if len(to_create) >= BATCH:
-                    created_objs = Product.objects.bulk_create(to_create, ignore_conflicts=True)
-                    prod_created += len(created_objs)
-                    to_create = []
+                existing_barcodes.add(barcode)
 
-                    # Wire M2M for this batch
-                    self._wire_categories(cat_map, products_data, prod_created - len(created_objs))
+                if len(batch) >= BATCH:
+                    Product.objects.bulk_create(batch, ignore_conflicts=True)
+                    prod_created += len(batch)
+                    batch = []
+                    self.stdout.write(f'  … {prod_created} products inserted so far')
 
-            # Final batch
-            if to_create:
-                created_objs = Product.objects.bulk_create(to_create, ignore_conflicts=True)
-                prod_created += len(created_objs)
-                to_create = []
+            if batch:
+                Product.objects.bulk_create(batch, ignore_conflicts=True)
+                prod_created += len(batch)
 
-            # Wire all categories via M2M (single pass over all products by barcode)
+            self.stdout.write(self.style.SUCCESS(
+                f'✓ Products: {prod_created} created, {prod_skipped} skipped (already exist)'
+            ))
+
+            # ── Wire M2M product → category ───────────────────────────────────
             self.stdout.write('Wiring product→category relationships …')
-            self._wire_all_categories(store, cat_map, products_data)
 
-        if unknown_cats:
-            self.stdout.write(
-                self.style.WARNING(f'  Auto-created {len(unknown_cats)} extra categories: {unknown_cats}')
+            barcode_to_cat = {p['barcode']: cat_map.get(p['category']) for p in products_data}
+
+            all_products = {
+                prod.barcode: prod
+                for prod in Product.objects.filter(store=store).only('id', 'barcode')
+            }
+
+            ThroughModel = Product.categories.through
+            existing_links = set(
+                ThroughModel.objects.filter(
+                    product__store=store
+                ).values_list('product_id', 'category_id')
             )
-        self.stdout.write(self.style.SUCCESS(
-            f'✓ Products: {prod_created} created, {prod_updated} price-updated, {prod_skipped} skipped (already up-to-date)'
-        ))
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+            links = []
+            for barcode, cat in barcode_to_cat.items():
+                prod = all_products.get(barcode)
+                if prod and cat and (prod.id, cat.id) not in existing_links:
+                    links.append(ThroughModel(product_id=prod.id, category_id=cat.id))
 
-    def _wire_all_categories(self, store, cat_map, products_data):
-        """Set the M2M category for every product in one efficient pass."""
-        from apps.products.models import Product
+            if links:
+                ThroughModel.objects.bulk_create(links, ignore_conflicts=True)
 
-        # Build barcode → category lookup
-        barcode_to_cat = {}
-        for p in products_data:
-            cat = cat_map.get(p['category'])
-            if cat:
-                barcode_to_cat[p['barcode']] = cat
+            self.stdout.write(self.style.SUCCESS(
+                f'✓ Linked {len(links)} product-category pairs'
+            ))
 
-        # Fetch all store products as a dict
-        qs = Product.objects.filter(store=store).only('id', 'barcode')
-        products_by_barcode = {prod.barcode: prod for prod in qs}
-
-        # Use through model bulk approach to avoid N+1
-        ThroughModel = Product.categories.through  # ProductCategory join table
-        existing_links = set(
-            ThroughModel.objects.filter(
-                product__store=store
-            ).values_list('product_id', 'category_id')
-        )
-
-        to_add = []
-        for barcode, cat in barcode_to_cat.items():
-            prod = products_by_barcode.get(barcode)
-            if prod and (prod.id, cat.id) not in existing_links:
-                to_add.append(ThroughModel(product_id=prod.id, category_id=cat.id))
-
-        if to_add:
-            ThroughModel.objects.bulk_create(to_add, ignore_conflicts=True)
-            self.stdout.write(f'  Linked {len(to_add)} product-category pairs')
+        self.stdout.write(self.style.SUCCESS('\n🎉 Done! All products imported successfully.'))
