@@ -196,7 +196,7 @@ class ProductModel {
     isAvailable:         j['is_available'] ?? true,
     isFeatured:          j['is_featured'] ?? false,
     sellUnit:            j['sell_unit'] ?? 'piece',
-    mainImageUrl:        j['main_image_url'] ?? '',
+    mainImageUrl:        j['image_url_s3'] ?? j['thumbnail_url'] ?? j['main_image_url'] ?? j['image_url'] ?? '',
     categories:          (j['categories'] as List? ?? []).map((c) => CategoryModel.fromJson(c)).toList(),
     alternatives:        (j['alternatives'] as List? ?? []).map((p) => ProductModel.fromJson(p)).toList(),
     related:             (j['related'] as List? ?? []).map((p) => ProductModel.fromJson(p)).toList(),
