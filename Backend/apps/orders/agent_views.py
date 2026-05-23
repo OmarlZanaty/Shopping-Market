@@ -600,6 +600,68 @@ class AgentMarkAvailableView(APIView):
         return ok({'is_available': True, 'product_id': str(product.id)})
 
 
+class AgentToggleAvailabilityView(APIView):
+    """PATCH /agent/inventory/toggle/:productId — flips is_available on/off."""
+    permission_classes = [permissions.IsAuthenticated, IsAgent]
+
+    def patch(self, request, product_id):
+        u = request.user
+        qs = Product.objects.filter(pk=product_id)
+        if u.store_id:
+            qs = qs.filter(store_id=u.store_id)
+        product = qs.first()
+        if not product:
+            return fail('Product not found', status_code=404)
+
+        product.is_available = not product.is_available
+        product.save(update_fields=['is_available'])
+
+        if u.branch_id:
+            ProductBranch.objects.update_or_create(
+                product=product, branch_id=u.branch_id,
+                defaults={'is_available': product.is_available},
+            )
+
+        # Notify waitlist only when turning ON
+        if product.is_available:
+            try:
+                from .tasks import notify_stock_waitlist
+                notify_stock_waitlist.delay(str(product.id))
+            except Exception:
+                pass
+
+        return ok({'is_available': product.is_available, 'product_id': str(product.id)})
+
+
+class AgentInventoryListView(APIView):
+    """GET /agent/inventory/products/ — all products for agent's store (active + inactive)."""
+    permission_classes = [permissions.IsAuthenticated, IsAgent]
+
+    def get(self, request):
+        u = request.user
+        qs = Product.objects.all().order_by('name_ar')
+        if u.store_id:
+            qs = qs.filter(store_id=u.store_id)
+
+        # Optional search
+        q = request.query_params.get('q', '').strip()
+        if q:
+            qs = qs.filter(name_ar__icontains=q) | qs.filter(name_en__icontains=q) | qs.filter(barcode__icontains=q)
+
+        # Optional filter by availability
+        available_param = request.query_params.get('available')
+        if available_param is not None:
+            qs = qs.filter(is_available=(available_param.lower() in ('1', 'true', 'yes')))
+
+        products = qs.values(
+            'id', 'name_ar', 'name_en', 'barcode',
+            'current_price', 'original_price',
+            'is_available', 'quantity_in_stock',
+            'is_weight_based',
+        )
+        return ok(list(products))
+
+
 # ─── Action log ──────────────────────────────────────────────────────────────
 
 class AgentActionLogView(APIView):

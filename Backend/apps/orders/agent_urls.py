@@ -31,9 +31,12 @@ urlpatterns = [
          name='agent-item-remove'),
 
     # Inventory
+    path('inventory/products/', v.AgentInventoryListView.as_view(), name='agent-inventory-products'),
     path('inventory/scan/<str:barcode>/', v.AgentInventoryScanView.as_view(), name='agent-inventory-scan'),
     path('inventory/mark-available/<uuid:product_id>/', v.AgentMarkAvailableView.as_view(),
          name='agent-inventory-mark-available'),
+    path('inventory/toggle/<uuid:product_id>/', v.AgentToggleAvailabilityView.as_view(),
+         name='agent-inventory-toggle'),
 
     # Action log + share
     path('orders/<str:order_id>/log/', v.AgentActionLogView.as_view(), name='agent-action-log'),

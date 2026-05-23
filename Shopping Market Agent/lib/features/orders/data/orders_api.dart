@@ -102,6 +102,16 @@ class OrdersApi {
   }
 
   // ── Inventory ────────────────────────────────────────────────────────────
+  Future<List<Map<String, dynamic>>> listInventory({String? q, bool? available}) async {
+    final res = await _dio.get(ApiConstants.inventoryProducts, queryParameters: {
+      if (q != null && q.isNotEmpty) 'q': q,
+      if (available != null) 'available': available ? '1' : '0',
+    });
+    return ApiEnvelope.unwrapList<Map<String, dynamic>>(
+      res.data, (o) => Map<String, dynamic>.from(o),
+    );
+  }
+
   Future<Map<String, dynamic>> inventoryScan(String barcode) async {
     final res = await _dio.get(ApiConstants.inventoryScan(barcode));
     final body = ApiEnvelope.unwrap(res.data) ?? res.data;
@@ -110,4 +120,12 @@ class OrdersApi {
 
   Future<void> markAvailable(String productId) async =>
       _dio.patch(ApiConstants.inventoryMarkAvailable(productId));
+
+  /// Flips is_available for a product. Returns updated is_available value.
+  Future<bool> toggleAvailability(String productId) async {
+    final res = await _dio.patch(ApiConstants.inventoryToggle(productId));
+    final body = ApiEnvelope.unwrap(res.data) ?? res.data;
+    final data = Map<String, dynamic>.from(body is Map ? body : {});
+    return data['is_available'] == true;
+  }
 }

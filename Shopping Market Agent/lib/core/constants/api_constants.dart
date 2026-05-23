@@ -52,8 +52,10 @@ class ApiConstants {
   static String itemRemove(String oid, int iid)      => '/agent/orders/$oid/items/$iid/';
 
   // Inventory
+  static const String inventoryProducts              =  '/agent/inventory/products/';
   static String inventoryScan(String barcode)        => '/agent/inventory/scan/$barcode/';
   static String inventoryMarkAvailable(String pid)   => '/agent/inventory/mark-available/$pid/';
+  static String inventoryToggle(String pid)          => '/agent/inventory/toggle/$pid/';
 
   // Uploads
   static const String uploadsPresign = '/uploads/presign/';
