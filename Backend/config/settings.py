@@ -293,18 +293,28 @@ LOGGING = {
     },
 }
 
+# ── CSRF trusted origins (required for Django admin over HTTP in staging) ─────
+_raw_hosts = config('ALLOWED_HOSTS', default='localhost,127.0.0.1')
+CSRF_TRUSTED_ORIGINS = [
+    f'http://{h}' for h in _raw_hosts.split(',') if h.strip()
+] + [
+    f'https://{h}' for h in _raw_hosts.split(',') if h.strip()
+]
+
 # ── Security (production only) ────────────────────────────────────────────────
+# HTTPS_ENABLED must be explicitly set True in .env once SSL is in place.
+_https = config('HTTPS_ENABLED', default=False, cast=bool)
 if not DEBUG:
-    SECURE_HSTS_SECONDS = 31536000
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
+    SECURE_HSTS_SECONDS = 31536000 if _https else 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = _https
+    SECURE_HSTS_PRELOAD = _https
     SECURE_SSL_REDIRECT = False
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    SESSION_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if _https else None
+    SESSION_COOKIE_SECURE = _https
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
-    CSRF_COOKIE_SECURE = True
-    CSRF_COOKIE_HTTPONLY = True
+    CSRF_COOKIE_SECURE = _https
+    CSRF_COOKIE_HTTPONLY = False  # must be readable by JS for admin login
     CSRF_COOKIE_SAMESITE = 'Lax'
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
