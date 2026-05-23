@@ -157,3 +157,94 @@ class VerifyOTPView(APIView):
         tokens = get_tokens_for_user(user)
         tokens['is_new_user'] = created
         return ok(tokens, message='OTP verified')
+
+
+# ─── Firebase Phone Auth token exchange ───────────────────────────────────────
+
+class FirebaseTokenLoginView(APIView):
+    """
+    Exchange a Firebase Phone Auth ID token for our Django JWT.
+
+    Flutter verifies the OTP directly with Firebase, then sends the resulting
+    Firebase ID token here. We verify it with firebase-admin, extract the
+    phone number, create or find the user, and return our JWT pair.
+
+    POST /auth/firebase-token/
+    Body: { id_token, phone, full_name?, fcm_token? }
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        id_token = request.data.get('id_token', '').strip()
+        phone_raw = request.data.get('phone', '').strip()
+        full_name = request.data.get('full_name', '').strip()
+        fcm_token = request.data.get('fcm_token', '').strip()
+
+        if not id_token:
+            return fail('id_token is required', status_code=400)
+
+        # Verify the Firebase ID token
+        try:
+            import firebase_admin
+            from firebase_admin import auth as firebase_auth, credentials as fb_creds
+            # Initialize the Firebase Admin app once (idempotent)
+            try:
+                firebase_admin.get_app()
+            except ValueError:
+                cred_path = getattr(settings, 'FIREBASE_SERVICE_ACCOUNT_JSON', None)
+                if cred_path:
+                    cred = fb_creds.Certificate(cred_path)
+                else:
+                    cred = fb_creds.ApplicationDefault()
+                firebase_admin.initialize_app(cred)
+
+            decoded = firebase_auth.verify_id_token(id_token)
+        except Exception as e:
+            logger.warning('Firebase token verification failed: %s', e)
+            return fail('Invalid Firebase token', status_code=401)
+
+        # Extract phone from the Firebase token (E.164 format: +201XXXXXXXXX)
+        firebase_phone = decoded.get('phone_number', '')
+        if not firebase_phone:
+            return fail('Firebase token has no phone_number claim', status_code=400)
+
+        # Normalise to local Egyptian format: +201XXXXXXXXX → 01XXXXXXXXX
+        if firebase_phone.startswith('+20'):
+            local_phone = firebase_phone[3:]      # strip +20
+        elif firebase_phone.startswith('20'):
+            local_phone = firebase_phone[2:]
+        else:
+            local_phone = firebase_phone.lstrip('+')
+
+        # Validate
+        try:
+            cleaned_phone = validate_egyptian_phone(local_phone)
+        except Exception:
+            cleaned_phone = local_phone
+
+        # Find or create the customer
+        user, created = User.objects.get_or_create(
+            phone=cleaned_phone,
+            defaults={
+                'full_name': full_name or 'New User',
+                'role': User.Role.CUSTOMER,
+                'login_type': User.LoginType.OTP,
+            },
+        )
+
+        if user.is_blocked:
+            return fail('Account blocked', errors=[{'reason': user.block_reason}], status_code=403)
+        if not user.is_active:
+            return fail('Account inactive', status_code=403)
+
+        # Update optional fields
+        if full_name and (not user.full_name or user.full_name == 'New User'):
+            user.full_name = full_name
+            user.save(update_fields=['full_name'])
+        if fcm_token:
+            user.fcm_token = fcm_token
+            user.save(update_fields=['fcm_token'])
+
+        tokens = get_tokens_for_user(user)
+        tokens['is_new_user'] = created
+        return ok(tokens, message='Firebase login successful')

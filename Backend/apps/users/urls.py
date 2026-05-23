@@ -9,6 +9,8 @@ urlpatterns = [
     # OTP customer auth (spec)
     path('send-otp/', otp_views.SendOTPView.as_view(), name='send-otp'),
     path('verify-otp/', otp_views.VerifyOTPView.as_view(), name='verify-otp'),
+    # Firebase Phone Auth token exchange (replaces SMS OTP on client side)
+    path('firebase-token/', otp_views.FirebaseTokenLoginView.as_view(), name='firebase-token-login'),
 
     # Staff + general auth
     path('register/', views.RegisterView.as_view(), name='register'),

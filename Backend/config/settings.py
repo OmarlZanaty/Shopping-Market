@@ -207,6 +207,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ── External services ────────────────────────────────────────────────────────
 FIREBASE_CREDENTIALS_PATH = config('FIREBASE_CREDENTIALS_PATH', default='firebase-credentials.json')
+# Path to Firebase service account JSON used by firebase-admin for Phone Auth token verification
+FIREBASE_SERVICE_ACCOUNT_JSON = config('FIREBASE_SERVICE_ACCOUNT_JSON', default='firebase-credentials.json')
 
 # Payment Gateways
 PAYMOB_API_KEY = config('PAYMOB_API_KEY', default='')
