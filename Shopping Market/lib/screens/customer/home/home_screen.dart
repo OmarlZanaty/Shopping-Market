@@ -532,8 +532,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showSearchBottomSheet(BuildContext context) {
-    final ctrl = TextEditingController();
+    final ctrl   = TextEditingController();
     List<ProductModel> results = [];
+    bool searching = false;
 
     showModalBottomSheet(
       context: context,
@@ -541,97 +542,364 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (_, ss) => Container(
-          height: MediaQuery.of(ctx).size.height * 0.85,
+          height: MediaQuery.of(ctx).size.height * 0.92,
           decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            color: Color(0xFFF7F9FC),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
           ),
           child: Column(children: [
+            // ── Handle ──────────────────────────────────────────────────────
             const SizedBox(height: 12),
-            Container(width: 40, height: 4,
-                decoration: BoxDecoration(color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2))),
+            Container(
+              width: 44, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // ── Title ────────────────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  const Text('البحث',
+                    style: TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.w800,
+                      fontFamily: 'Cairo', color: AppColors.textMain,
+                    )),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(ctx),
+                    child: Container(
+                      width: 32, height: 32,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[200],
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.close_rounded,
+                          size: 16, color: AppColors.textMain),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // ── Search field ─────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(children: [
                 Expanded(
-                  child: TextField(
-                    controller: ctrl,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      hintText: 'ابحث عن منتج أو أدخل الباركود...',
-                      hintStyle: const TextStyle(fontFamily: 'Cairo'),
-                      prefixIcon: const Icon(Icons.search),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                  child: Container(
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.midnight.withOpacity(0.06),
+                          blurRadius: 12, offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                    onChanged: (q) async {
-                      if (q.length >= 1) {
-                        final res = await _api.searchSuggestions(q);
-                        ss(() => results = res);
-                      }
-                    },
+                    child: TextField(
+                      controller: ctrl,
+                      autofocus: true,
+                      textDirection: TextDirection.rtl,
+                      style: const TextStyle(
+                        fontFamily: 'Cairo', fontSize: 14,
+                        color: AppColors.textMain,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'اكتب اسم المنتج أو الباركود...',
+                        hintStyle: TextStyle(
+                          fontFamily: 'Cairo', fontSize: 13,
+                          color: AppColors.textMuted,
+                        ),
+                        prefixIcon: searching
+                          ? const Padding(
+                              padding: EdgeInsets.all(14),
+                              child: SizedBox(
+                                width: 16, height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: AppColors.coral,
+                                ),
+                              ),
+                            )
+                          : const Icon(Icons.search_rounded,
+                              color: AppColors.sky, size: 22),
+                        suffixIcon: ctrl.text.isNotEmpty
+                          ? GestureDetector(
+                              onTap: () {
+                                ctrl.clear();
+                                ss(() { results = []; searching = false; });
+                              },
+                              child: const Icon(Icons.close_rounded,
+                                  color: AppColors.textMuted, size: 18),
+                            )
+                          : null,
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 16),
+                      ),
+                      onChanged: (q) async {
+                        if (q.length >= 1) {
+                          ss(() => searching = true);
+                          final res = await _api.searchSuggestions(q);
+                          ss(() { results = res; searching = false; });
+                        } else {
+                          ss(() { results = []; searching = false; });
+                        }
+                      },
+                    ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
+                // Barcode scanner button
                 GestureDetector(
                   onTap: () async {
                     Navigator.pop(ctx);
-                    // Open barcode scanner
                     final result = await Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()));
+                      MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()));
                     if (result != null && mounted) {
                       context.push('/product/$result');
                     }
                   },
                   child: Container(
-                    padding: const EdgeInsets.all(12),
+                    width: 52, height: 52,
                     decoration: BoxDecoration(
-                      color: AppColors.coral,
-                      borderRadius: BorderRadius.circular(14),
+                      gradient: AppColors.coralGradient,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.coral.withOpacity(0.3),
+                          blurRadius: 10, offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                    child: const Icon(Icons.qr_code_scanner,
+                    child: const Icon(Icons.qr_code_scanner_rounded,
                         color: Colors.white, size: 24),
                   ),
                 ),
               ]),
             ),
+
+            const SizedBox(height: 16),
+
+            // ── Results ──────────────────────────────────────────────────────
             Expanded(
-              child: ListView.builder(
-                itemCount: results.length,
-                itemBuilder: (_, i) {
-                  final p = results[i];
-                  return ListTile(
-                    leading: Container(
-                      width: 48, height: 48,
-                      decoration: BoxDecoration(
-                        color: AppColors.ice,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: p.mainImageUrl.isNotEmpty
-                          ? ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: Image.network(p.mainImageUrl, fit: BoxFit.cover))
-                          : const Icon(Icons.shopping_bag_outlined,
-                          color: AppColors.sky),
-                    ),
-                    title: Text(p.nameAr,
-                        style: const TextStyle(fontFamily: 'Cairo',
-                            fontWeight: FontWeight.w600)),
-                    subtitle: Text('${p.currentPrice} ج',
-                        style: const TextStyle(color: AppColors.coral,
-                            fontWeight: FontWeight.w700, fontFamily: 'Cairo')),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      context.push('/product/${p.id}');
+              child: results.isEmpty
+                ? _buildSearchEmptyState(ctrl.text)
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                    itemCount: results.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (_, i) {
+                      final p = results[i];
+                      return _buildSearchResultCard(ctx, p);
                     },
-                  );
-                },
-              ),
+                  ),
             ),
           ]),
         ),
       ),
+    );
+  }
+
+  Widget _buildSearchResultCard(BuildContext ctx, ProductModel p) {
+    final hasImage   = p.mainImageUrl.isNotEmpty;
+    final outOfStock = p.isOutOfStock || !p.isAvailable;
+    final cart       = context.read<CartProvider>();
+
+    return GestureDetector(
+      onTap: () {
+        Navigator.pop(ctx);
+        context.push('/product/${p.id}');
+      },
+      child: Container(
+        height: 88,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.midnight.withOpacity(0.06),
+              blurRadius: 12, offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(children: [
+          // Image
+          ClipRRect(
+            borderRadius: const BorderRadius.horizontal(right: Radius.circular(18)),
+            child: SizedBox(
+              width: 88, height: 88,
+              child: hasImage
+                ? CachedNetworkImage(
+                    imageUrl: p.mainImageUrl,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => Container(color: AppColors.ice,
+                      child: const Center(child: Icon(Icons.shopping_basket_outlined,
+                          color: AppColors.sky, size: 24))),
+                    errorWidget: (_, __, ___) => Container(color: AppColors.ice,
+                      child: const Center(child: Icon(Icons.shopping_basket_outlined,
+                          color: AppColors.sky, size: 24))),
+                  )
+                : Container(color: AppColors.ice,
+                    child: const Center(child: Icon(Icons.shopping_basket_outlined,
+                        color: AppColors.sky, size: 24))),
+            ),
+          ),
+
+          // Info
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(p.nameAr,
+                    style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w700,
+                      fontFamily: 'Cairo', color: AppColors.textMain,
+                    ),
+                    maxLines: 2, overflow: TextOverflow.ellipsis,
+                  ),
+                  Row(children: [
+                    // Price
+                    Text(
+                      p.currentPrice > 0
+                        ? '${p.currentPrice.toStringAsFixed(2)} ج'
+                        : 'السعر عند الطلب',
+                      style: TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w800,
+                        fontFamily: 'Cairo',
+                        color: p.currentPrice > 0
+                          ? AppColors.midnight : AppColors.textMuted,
+                      ),
+                    ),
+                    if (p.isOnSale) ...[
+                      const SizedBox(width: 6),
+                      Text('${p.originalPrice.toStringAsFixed(1)} ج',
+                        style: const TextStyle(
+                          fontSize: 10, color: AppColors.textMuted,
+                          decoration: TextDecoration.lineThrough,
+                          fontFamily: 'Cairo',
+                        ),
+                      ),
+                    ],
+                  ]),
+                ],
+              ),
+            ),
+          ),
+
+          // Add button
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: outOfStock
+              ? Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text('نفذ',
+                    style: TextStyle(fontSize: 10, color: AppColors.textMuted,
+                        fontFamily: 'Cairo')),
+                )
+              : GestureDetector(
+                  onTap: () {
+                    cart.addItem(p);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('تمت الإضافة: ${p.nameAr}',
+                          style: const TextStyle(fontFamily: 'Cairo')),
+                      backgroundColor: AppColors.mint,
+                      duration: const Duration(seconds: 2),
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ));
+                  },
+                  child: Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(
+                      gradient: AppColors.coralGradient,
+                      borderRadius: BorderRadius.circular(11),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.coral.withOpacity(0.3),
+                          blurRadius: 8, offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.add_rounded,
+                        color: Colors.white, size: 22),
+                  ),
+                ),
+          ),
+
+          const SizedBox(width: 12),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildSearchEmptyState(String query) {
+    if (query.isEmpty) {
+      return Center(
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Container(
+            width: 80, height: 80,
+            decoration: BoxDecoration(
+              color: AppColors.ice,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.search_rounded,
+                color: AppColors.sky, size: 36),
+          ),
+          const SizedBox(height: 16),
+          const Text('ابحث عن منتجاتك',
+            style: TextStyle(
+              fontSize: 16, fontWeight: FontWeight.w700,
+              fontFamily: 'Cairo', color: AppColors.textMain,
+            )),
+          const SizedBox(height: 6),
+          Text('اكتب اسم المنتج أو امسح الباركود',
+            style: TextStyle(
+              fontSize: 13, fontFamily: 'Cairo',
+              color: AppColors.textMuted,
+            )),
+        ]),
+      );
+    }
+    return Center(
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(
+          width: 80, height: 80,
+          decoration: BoxDecoration(
+            color: AppColors.peach,
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.search_off_rounded,
+              color: AppColors.coral, size: 36),
+        ),
+        const SizedBox(height: 16),
+        const Text('لا توجد نتائج',
+          style: TextStyle(
+            fontSize: 16, fontWeight: FontWeight.w700,
+            fontFamily: 'Cairo', color: AppColors.textMain,
+          )),
+        const SizedBox(height: 6),
+        Text('لم نجد منتجاً يطابق "$query"',
+          style: TextStyle(
+            fontSize: 13, fontFamily: 'Cairo',
+            color: AppColors.textMuted,
+          )),
+      ]),
     );
   }
 }
