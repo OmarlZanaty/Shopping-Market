@@ -23,11 +23,33 @@ def create_customer_order(customer, payload):
     Deducts stock + points + wallet (if used).
     Returns the created Order.
     """
-    address_id = payload['address_id']
-    try:
-        address = Address.objects.get(pk=address_id, user=customer)
-    except Address.DoesNotExist:
-        raise OrderError('Address not found or does not belong to current user')
+    address_id = payload.get('address_id')
+    if address_id:
+        try:
+            address = Address.objects.get(pk=address_id, user=customer)
+        except Address.DoesNotExist:
+            raise OrderError('Address not found or does not belong to current user')
+        _delivery_address  = address.full_address
+        _building_number   = address.building_number or ''
+        _floor_number      = address.floor_number or ''
+        _apartment_number  = address.apartment_number or ''
+        _landmark          = address.landmark or ''
+        _delivery_lat      = address.latitude
+        _delivery_lng      = address.longitude
+        _delivery_name     = customer.full_name
+        _delivery_phone    = customer.phone
+    else:
+        # Inline address — no saved address required
+        address = None
+        _delivery_address  = payload.get('delivery_address', '')
+        _building_number   = payload.get('building_number', '')
+        _floor_number      = payload.get('floor_number', '')
+        _apartment_number  = payload.get('apartment_number', '')
+        _landmark          = payload.get('landmark', '')
+        _delivery_lat      = None
+        _delivery_lng      = None
+        _delivery_name     = payload.get('delivery_name', '') or customer.full_name
+        _delivery_phone    = payload.get('delivery_phone', '') or customer.phone
 
     items_data = payload['items']
     if not items_data:
@@ -62,22 +84,33 @@ def create_customer_order(customer, payload):
         if p.quantity_in_stock < qty_dec:
             raise OrderError(f'Insufficient stock for {p.name_en}')
 
+    # Determine branch: use the one sent by the app, else fall back to the
+    # store's first/default branch so the order is properly scoped to agents.
+    branch_id = payload.get('branch_id')
+    if not branch_id:
+        from apps.branches.models import Branch
+        default_branch = (
+            Branch.objects.filter(store_id=store_id).order_by('id').first()
+            or Branch.objects.order_by('id').first()
+        )
+        branch_id = default_branch.id if default_branch else None
+
     # Build order
-    delivery_fee = _resolve_delivery_fee(store_id, payload.get('branch_id'))
+    delivery_fee = _resolve_delivery_fee(store_id, branch_id)
     order = Order(
         store_id=store_id,
         customer=customer,
-        branch_id=payload.get('branch_id'),
+        branch_id=branch_id,
         address=address,
-        delivery_address=address.full_address,
-        building_number=address.building_number,
-        floor_number=address.floor_number,
-        apartment_number=address.apartment_number,
-        landmark=address.landmark,
-        delivery_latitude=address.latitude,
-        delivery_longitude=address.longitude,
-        delivery_name=customer.full_name,
-        delivery_phone=customer.phone,
+        delivery_address=_delivery_address,
+        building_number=_building_number,
+        floor_number=_floor_number,
+        apartment_number=_apartment_number,
+        landmark=_landmark,
+        delivery_latitude=_delivery_lat,
+        delivery_longitude=_delivery_lng,
+        delivery_name=_delivery_name,
+        delivery_phone=_delivery_phone,
         payment_method=payload.get('payment_method', Order.PaymentMethod.CASH),
         customer_notes=payload.get('notes') or payload.get('customer_notes', ''),
         delivery_fee=delivery_fee,
@@ -183,8 +216,9 @@ def create_customer_order(customer, payload):
         order.amount_collected = order.total_amount
     order.save()
 
-    # Notify admin
+    # Notify admin + preparers
     _notify_admin_new_order(order)
+    _notify_preparers_new_order(order)
 
     return order
 
@@ -218,7 +252,46 @@ def _notify_admin_new_order(order):
             body_ar=f'طلب جديد رقم {order.order_number} من {order.customer.full_name}',
             body_en=f'New order #{order.order_number} from {order.customer.full_name}',
             data={'type': 'new_order', 'order_id': str(order.id),
-                  'order_number': order.order_number, 'store_id': order.store_id},
+                  'order_number': order.order_number, 'store_id': str(order.store_id or '')},
+        )
+
+
+def _notify_preparers_new_order(order):
+    """Notify all active preparers at the same store so they can claim the order."""
+    from apps.notifications.utils import send_push_notification
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    from django.db.models import Q
+    # Notify preparers at the same store, plus those with no store assigned
+    # (single-store setups where agents aren't scoped to a store yet).
+    preparers = User.objects.filter(
+        Q(store_id=order.store_id) | Q(store_id__isnull=True),
+        role='preparer',
+        is_active=True,
+    )
+
+    item_count = order.items.count()
+    customer_area = order.delivery_address or ''
+
+    common_data = {
+        'type': 'new_order',
+        'order_id': str(order.id),
+        'order_number': str(order.order_number),
+        'store_id': str(order.store_id or ''),
+        'item_count': str(item_count),
+        'customer_area': customer_area,
+        'total': str(order.total_amount),
+    }
+
+    for preparer in preparers:
+        send_push_notification(
+            user=preparer,
+            title_ar='🛒 طلب جديد!',
+            title_en='New Order!',
+            body_ar=f'طلب رقم {order.order_number} — {item_count} منتج — {order.total_amount} ج',
+            body_en=f'Order #{order.order_number} — {item_count} items — {order.total_amount} EGP',
+            data=common_data,
         )
 
 

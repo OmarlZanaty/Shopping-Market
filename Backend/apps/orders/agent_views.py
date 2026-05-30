@@ -73,21 +73,30 @@ def _schedule_approval_timeout(adjustment):
 class AgentOrderListView(generics.ListAPIView):
     serializer_class = OrderListSerializer
     permission_classes = [permissions.IsAuthenticated, IsAgent]
+    # Disable global DjangoFilterBackend — status filtering is handled
+    # manually in get_queryset() to support comma-separated multi-status queries.
+    filter_backends = []
 
     def get_queryset(self):
         u = self.request.user
         qs = Order.objects.select_related('customer', 'branch', 'store')
-        if u.role == 'preparer':
-            qs = qs.filter(preparer=u) | qs.filter(preparer__isnull=True, status='new')
-        elif u.role == 'driver':
-            qs = qs.filter(driver=u) | qs.filter(driver__isnull=True, status='out_for_delivery')
+        # Agents see ALL orders within their store/branch scope, in every status —
+        # not just the ones assigned to them. Scope filtering happens below.
         if u.store_id:
-            qs = qs.filter(store_id=u.store_id)
+            from django.db.models import Q
+            qs = qs.filter(Q(store_id=u.store_id) | Q(store_id__isnull=True))
         if u.branch_id:
-            qs = qs.filter(branch_id=u.branch_id)
+            from django.db.models import Q
+            # Include orders with no branch set (e.g. customer app didn't send branch_id)
+            qs = qs.filter(Q(branch_id=u.branch_id) | Q(branch_id__isnull=True))
         status_filter = self.request.query_params.get('status')
         if status_filter:
-            qs = qs.filter(status=status_filter)
+            # Support comma-separated values: ?status=accepted,preparing,out_for_delivery
+            statuses = [s.strip() for s in status_filter.split(',') if s.strip()]
+            if len(statuses) == 1:
+                qs = qs.filter(status=statuses[0])
+            else:
+                qs = qs.filter(status__in=statuses)
         return qs.distinct().order_by('-created_at')
 
 
@@ -188,7 +197,7 @@ class AgentPickedUpView(APIView):
 
 
 class AgentDeliveredView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsDriver]
+    permission_classes = [permissions.IsAuthenticated, IsAgent]
 
     def patch(self, request, order_id):
         ser = DriverDeliveredSerializer(data=request.data)
@@ -199,7 +208,8 @@ class AgentDeliveredView(APIView):
             return fail('Order not found', status_code=404)
         if order.status != Order.Status.OUT_FOR_DELIVERY:
             return fail('Order must be out for delivery', status_code=400)
-        if order.driver_id != request.user.id:
+        # Allow both the assigned driver AND the preparer (single-agent flow).
+        if order.driver_id != request.user.id and order.preparer_id != request.user.id:
             return fail('Not your delivery', status_code=403)
 
         order.amount_collected = ser.validated_data.get('amount_collected') or order.total_amount
@@ -208,27 +218,19 @@ class AgentDeliveredView(APIView):
             order.driver_proof_image = request.FILES['proof_image']
         order.save(update_fields=['amount_collected', 'delivery_photo_url', 'driver_proof_image'])
 
-        # Set the 2hr auto-close timer
-        from django.conf import settings as django_settings
-        hours = getattr(django_settings, 'AUTO_CLOSE_TIMEOUT_HOURS', 2)
-        auto_close_at = timezone.now() + timezone.timedelta(hours=hours)
-        SmartTimerAutoClose.objects.update_or_create(
-            order=order,
-            defaults={'auto_close_scheduled_at': auto_close_at, 'is_resolved': False},
-        )
-        try:
-            from .tasks import auto_close_order
-            auto_close_order.apply_async(args=[str(order.id)], eta=auto_close_at)
-        except Exception:
-            pass
-
-        # Add cash to driver's running total
+        # Add cash to the agent's running total.
         if order.payment_method == Order.PaymentMethod.CASH:
             request.user.cash_on_hand = float(request.user.cash_on_hand) + float(order.amount_collected)
             request.user.save(update_fields=['cash_on_hand'])
 
-        return ok({'message': 'Marked as delivered. Awaiting customer confirmation.',
-                   'auto_close_at': auto_close_at})
+        # Immediately mark as delivered — single-agent flow, no customer confirmation step.
+        order.update_status(Order.Status.DELIVERED, user=request.user)
+        try:
+            order.award_points()
+        except Exception:
+            pass
+
+        return ok({'message': 'تم تسليم الطلب بنجاح', 'status': 'delivered'})
 
 
 class AgentForceCloseView(APIView):
@@ -505,6 +507,28 @@ class AgentAddItemView(APIView):
                     'adjustment_id': str(adj.id), 'item_id': str(item.id)})
         _schedule_approval_timeout(adj)
         return ok({'item_id': item.id, 'adjustment_id': adj.id}, status_code=201)
+
+
+class AgentItemResetView(APIView):
+    """PATCH /agent/orders/:orderId/items/:itemId/reset — revert unavailable → pending."""
+    permission_classes = [permissions.IsAuthenticated, IsAgent]
+
+    def patch(self, request, order_id, item_id):
+        item, err = _resolve_item(order_id, item_id, request.user)
+        if err:
+            return err
+        if item.status not in (
+            OrderItem.ItemStatus.UNAVAILABLE,
+            OrderItem.ItemStatus.REMOVED,
+        ):
+            return fail(
+                f'Item cannot be reset from status "{item.status}"',
+                status_code=400,
+            )
+        item.status = OrderItem.ItemStatus.PENDING
+        item.actual_qty = None
+        item.save(update_fields=['status', 'actual_qty'])
+        return ok({'status': 'pending', 'item_id': item.id})
 
 
 class AgentRemoveItemView(APIView):
