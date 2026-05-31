@@ -41,11 +41,17 @@ class _PickingScreenState extends ConsumerState<PickingScreen> {
     final orderAsync = ref.watch(orderDetailProvider(widget.orderId));
     return Scaffold(
       appBar: AppBar(title: const Text('تجميع الطلب')),
-      body: orderAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator(color: AppColors.accentOrange)),
-        error: (e, _) => Center(child: Text(e.toString())),
-        data: (order) {
+      body: Builder(builder: (context) {
+        // Prefer the last-good order so a transient refresh failure (e.g. a
+        // dropped connection after a rapid tap) doesn't blow away the screen.
+        final order = orderAsync.valueOrNull;
+        if (order == null) {
+          return orderAsync.hasError
+              ? Center(child: Text(orderAsync.error.toString()))
+              : const Center(
+                  child: CircularProgressIndicator(color: AppColors.accentOrange));
+        }
+        {
           final picked = order.items.where(_isPicked).length;
           final total = order.items.length;
           final pct = total > 0 ? picked / total : 0.0;
@@ -206,8 +212,8 @@ class _PickingScreenState extends ConsumerState<PickingScreen> {
                 ),
             ],
           );
-        },
-      ),
+        }
+      }),
       floatingActionButton: FloatingActionButton(
         backgroundColor: AppColors.accentOrange,
         onPressed: () async {
