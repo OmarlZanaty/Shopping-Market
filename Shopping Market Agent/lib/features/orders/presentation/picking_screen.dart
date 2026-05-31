@@ -453,9 +453,17 @@ class _ItemRowState extends ConsumerState<_ItemRow> {
   Future<void> _resetItem() async {
     setState(() => _busy = true);
     try {
-      await ref
-          .read(ordersApiProvider)
-          .resetItem(widget.orderId, widget.item.id);
+      try {
+        await ref
+            .read(ordersApiProvider)
+            .resetItem(widget.orderId, widget.item.id);
+      } catch (_) {
+        // Fallback for servers that don't expose the reset route yet:
+        // clear the picked quantity via the qty endpoint instead.
+        await ref
+            .read(ordersApiProvider)
+            .setActualQty(widget.orderId, widget.item.id, 0);
+      }
       ref.refresh(orderDetailProvider(widget.orderId));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

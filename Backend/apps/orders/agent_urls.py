@@ -21,6 +21,8 @@ urlpatterns = [
          name='agent-item-qty'),
     path('orders/<str:order_id>/items/<int:item_id>/unavailable/', v.AgentItemUnavailableView.as_view(),
          name='agent-item-unavailable'),
+    path('orders/<str:order_id>/items/<int:item_id>/reset/', v.AgentItemResetView.as_view(),
+         name='agent-item-reset'),
     path('orders/<str:order_id>/items/<int:item_id>/price/', v.AgentItemAdjustPriceView.as_view(),
          name='agent-item-price'),
     path('orders/<str:order_id>/items/<int:item_id>/weight/', v.AgentItemAdjustWeightView.as_view(),
