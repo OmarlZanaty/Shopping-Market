@@ -22,6 +22,11 @@ class _PreparerHomeScreenState extends ConsumerState<PreparerHomeScreen>
   void initState() {
     super.initState();
     _tab = TabController(length: 3, vsync: this);
+    // Refresh whenever the user switches tabs. Steady polling is handled by the
+    // provider-level auto-refresh in ordersListProvider.
+    _tab.addListener(() {
+      if (_tab.indexIsChanging && mounted) ref.invalidate(ordersListProvider);
+    });
   }
 
   @override
@@ -44,6 +49,28 @@ class _PreparerHomeScreenState extends ConsumerState<PreparerHomeScreen>
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (_) => AlertDialog(
+                  backgroundColor: AppColors.backgroundSecondary,
+                  title: const Text('تسجيل الخروج'),
+                  content: const Text('هل تريد تسجيل الخروج من التطبيق؟'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('إلغاء'),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.errorRed,
+                      ),
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('خروج'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm != true || !mounted) return;
               await ref.read(agentAuthControllerProvider.notifier).logout();
               if (mounted) context.go('/login');
             },
@@ -65,9 +92,12 @@ class _PreparerHomeScreenState extends ConsumerState<PreparerHomeScreen>
       body: TabBarView(
         controller: _tab,
         children: [
-          _OrderList(statusGroup: 'new'),
-          _OrderList(statusGroup: 'preparing'),
-          _OrderList(statusGroup: 'delivered'),
+          // New orders waiting to be accepted
+          const _OrderList(statusGroup: 'new'),
+          // In-progress: accepted (not started yet) + preparing + out for delivery
+          const _OrderList(statusGroup: 'accepted,preparing,out_for_delivery'),
+          // Completed
+          const _OrderList(statusGroup: 'delivered'),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -119,9 +149,14 @@ class _OrderList extends ConsumerWidget {
               return OrderCard(
                 orderNumber: o.orderNumber,
                 status: o.status,
-                itemCount: o.items.length,
+                itemCount: o.itemCount,
                 total: o.total,
                 customerArea: _districtOf(o),
+                customerName: o.customerName,
+                customerPhone: o.customerPhone,
+                addressFull: o.addressFull,
+                paymentMethod: o.paymentMethod,
+                itemsPreview: o.itemsPreview,
                 createdAt: o.createdAt,
                 onTap: () => GoRouter.of(context).push('/order/${o.id}'),
               );
