@@ -32,15 +32,13 @@ def _lookup_order_for_agent(order_id, user):
              or qs.filter(id=order_id).first())
     if not order:
         return None
-    # Visible only if assigned to this agent OR unassigned (pool)
-    if order.preparer_id == user.id or order.driver_id == user.id:
-        return order
-    if order.preparer_id is None and order.driver_id is None:
-        return order
-    # Branch managers' branch_id matches?
-    if user.role == 'branch_manager' and order.branch_id == user.branch_id:
-        return order
-    return None
+    # Agents see ALL orders within their store/branch scope (matching the list
+    # view), not just the ones assigned to them. Scope is enforced below.
+    if user.store_id and order.store_id not in (user.store_id, None):
+        return None
+    if user.branch_id and order.branch_id not in (user.branch_id, None):
+        return None
+    return order
 
 
 def _push(user, title_ar, title_en, body_ar, body_en, data=None):
@@ -295,7 +293,13 @@ class AgentItemAdjustQtyView(APIView):
         new_qty = ser.validated_data['actual_qty']
         old_qty = item.quantity
         item.actual_qty = new_qty
-        item.save(update_fields=['actual_qty'])
+        # Recording a quantity means the item has been picked. Flip the status so
+        # the agent app can rely on status to show selection (and allow un-picking).
+        update_fields = ['actual_qty']
+        if item.status == OrderItem.ItemStatus.PENDING:
+            item.status = OrderItem.ItemStatus.PICKED
+            update_fields.append('status')
+        item.save(update_fields=update_fields)
 
         adj = OrderAdjustment.objects.create(
             order=item.order, order_item=item, preparer=request.user if request.user.role == 'preparer' else None,
@@ -517,10 +521,14 @@ class AgentItemResetView(APIView):
         item, err = _resolve_item(order_id, item_id, request.user)
         if err:
             return err
-        if item.status not in (
+        # Allow reset from picked/unavailable/removed, and also from pending when a
+        # quantity was already recorded (legacy rows where status never flipped).
+        resettable = item.status in (
             OrderItem.ItemStatus.UNAVAILABLE,
             OrderItem.ItemStatus.REMOVED,
-        ):
+            OrderItem.ItemStatus.PICKED,
+        ) or (item.status == OrderItem.ItemStatus.PENDING and item.actual_qty is not None)
+        if not resettable:
             return fail(
                 f'Item cannot be reset from status "{item.status}"',
                 status_code=400,

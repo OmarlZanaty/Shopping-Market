@@ -51,6 +51,9 @@ class OrdersApi {
     return Map<String, dynamic>.from(body is Map ? body : {});
   }
 
+  Future<void> failedDelivery(String orderId, {String reason = 'فشل التوصيل'}) async =>
+      _dio.patch(ApiConstants.agentFailedDelivery(orderId), data: {'reason': reason});
+
   Future<void> forceClose(String orderId, {
     required String deliveryPhotoUrl,
     String reason = 'auto_close_timeout',
@@ -63,8 +66,11 @@ class OrdersApi {
   Future<void> markUnavailable(String orderId, int itemId) async =>
       _dio.patch(ApiConstants.itemUnavailable(orderId, itemId));
 
+  Future<void> resetItem(String orderId, int itemId) async =>
+      _dio.patch(ApiConstants.itemReset(orderId, itemId));
+
   Future<void> setActualQty(String orderId, int itemId, double qty) async =>
-      _dio.patch(ApiConstants.itemQty(orderId, itemId), data: {'qty': qty});
+      _dio.patch(ApiConstants.itemQty(orderId, itemId), data: {'actual_qty': qty});
 
   Future<void> adjustPrice(String orderId, int itemId, double newPrice, String reason) async =>
       _dio.patch(ApiConstants.itemPrice(orderId, itemId), data: {
