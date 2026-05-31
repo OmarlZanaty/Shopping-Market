@@ -98,6 +98,10 @@ class OrderListSerializer(serializers.ModelSerializer):
         fields = ['id', 'order_number', 'order_id', 'store', 'status', 'total_amount',
                   'payment_method', 'payment_status',
                   'customer_name', 'driver_name', 'preparer_name', 'items_count',
+                  # Delivery location so the agent order card can show the address.
+                  'delivery_address', 'building_number', 'floor_number',
+                  'apartment_number', 'landmark', 'delivery_latitude',
+                  'delivery_longitude', 'delivery_phone',
                   'created_at', 'accepted_at', 'preparing_at', 'out_for_delivery_at',
                   'delivered_at', 'cancelled_at']
 
@@ -118,8 +122,24 @@ class OrderItemCreateSerializer(serializers.Serializer):
 
 
 class OrderCreateSerializer(serializers.Serializer):
-    """Spec-shape: { address_id, items[{product_id, qty}], payment_method, notes, promo_code, points_to_use }."""
-    address_id = serializers.IntegerField()
+    """
+    Accepts two shapes:
+      A) { address_id, items, payment_method, ... }   — saved address
+      B) { delivery_address, building_number, floor_number, apartment_number,
+           delivery_name, delivery_phone, items, payment_method, ... }  — inline address
+    """
+    # Saved-address mode (optional)
+    address_id = serializers.IntegerField(required=False)
+
+    # Inline-address mode (all optional; service validates at least one mode is present)
+    delivery_name    = serializers.CharField(required=False, allow_blank=True, default='')
+    delivery_phone   = serializers.CharField(required=False, allow_blank=True, default='')
+    delivery_address = serializers.CharField(required=False, allow_blank=True, default='')
+    building_number  = serializers.CharField(required=False, allow_blank=True, default='')
+    floor_number     = serializers.CharField(required=False, allow_blank=True, default='')
+    apartment_number = serializers.CharField(required=False, allow_blank=True, default='')
+    landmark         = serializers.CharField(required=False, allow_blank=True, default='')
+
     items = OrderItemCreateSerializer(many=True)
     payment_method = serializers.ChoiceField(
         choices=[c[0] for c in Order.PaymentMethod.choices],
@@ -131,6 +151,13 @@ class OrderCreateSerializer(serializers.Serializer):
     points_to_use = serializers.IntegerField(min_value=0, default=0)
     store_id = serializers.IntegerField(required=False)
     branch_id = serializers.IntegerField(required=False)
+
+    def validate(self, attrs):
+        if not attrs.get('address_id') and not attrs.get('delivery_address'):
+            raise serializers.ValidationError(
+                'Either address_id or delivery_address must be provided'
+            )
+        return attrs
 
 
 class AdjustPriceSerializer(serializers.Serializer):
