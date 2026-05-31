@@ -226,11 +226,14 @@ class _PickingScreenState extends ConsumerState<PickingScreen> {
     setState(() => _togglingIds.add(id));
     try {
       if (_isPicked(item)) {
-        // Deselect: set actual_qty to 0. The deployed backend has no reset
-        // route, but the qty endpoint accepts 0 (min_value=0). The frontend
-        // treats actualQty == 0 as not picked.
-        await ref.read(ordersApiProvider)
-            .setActualQty(widget.orderId, item.id, 0);
+        // Deselect: reset the item (clears status→pending and actual_qty→null).
+        // Falls back to qty=0 on servers without the reset route.
+        try {
+          await ref.read(ordersApiProvider).resetItem(widget.orderId, item.id);
+        } catch (_) {
+          await ref.read(ordersApiProvider)
+              .setActualQty(widget.orderId, item.id, 0);
+        }
       } else {
         await ref.read(ordersApiProvider)
             .setActualQty(widget.orderId, item.id, item.requestedQty);

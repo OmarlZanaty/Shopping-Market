@@ -293,11 +293,15 @@ class AgentItemAdjustQtyView(APIView):
         new_qty = ser.validated_data['actual_qty']
         old_qty = item.quantity
         item.actual_qty = new_qty
-        # Recording a quantity means the item has been picked. Flip the status so
-        # the agent app can rely on status to show selection (and allow un-picking).
+        # Recording a quantity means the item has been picked; a zero quantity
+        # means it was un-picked. Keep status in sync so the agent app can rely
+        # on it for selection state.
         update_fields = ['actual_qty']
-        if item.status == OrderItem.ItemStatus.PENDING:
+        if new_qty > 0 and item.status == OrderItem.ItemStatus.PENDING:
             item.status = OrderItem.ItemStatus.PICKED
+            update_fields.append('status')
+        elif new_qty == 0 and item.status == OrderItem.ItemStatus.PICKED:
+            item.status = OrderItem.ItemStatus.PENDING
             update_fields.append('status')
         item.save(update_fields=update_fields)
 
