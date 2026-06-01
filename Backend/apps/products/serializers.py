@@ -199,6 +199,10 @@ class BannerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Banner
         fields = '__all__'
+        extra_kwargs = {
+            # store is injected server-side (enforce_store_id_on_create)
+            'store': {'required': False},
+        }
 
     def validate_image(self, value):
         return validate_image_upload(value)
