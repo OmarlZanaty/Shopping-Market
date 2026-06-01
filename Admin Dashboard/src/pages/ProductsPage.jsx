@@ -36,11 +36,20 @@ export default function ProductsPage() {
     },
   });
 
+  const notifyWaitlistMutation = useMutation({
+    mutationFn: (id) => productApi.notifyWaitlist(id),
+    onSuccess: () => toast.success(t('تم إرسال الإشعارات لقائمة الانتظار ✅', 'Waitlist notifications sent ✅')),
+    onError: () => toast.error(t('فشل إرسال الإشعارات', 'Failed to send notifications')),
+  });
+
   const searchByBarcode = async () => {
     if (!barcodeInput.trim()) return;
     try {
       const { data } = await productApi.byBarcode(barcodeInput.trim());
-      navigate(`/products/${data.id}/edit`);
+      // Response is the { success, data: {...product} } envelope — unwrap it.
+      const product = data?.data ?? data;
+      if (!product?.id) throw new Error('not found');
+      navigate(`/products/${product.id}/edit`);
     } catch {
       toast.error(t('المنتج غير موجود', 'Product not found'));
     }
@@ -107,6 +116,7 @@ export default function ProductsPage() {
                   <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('السعر', 'Price')}</th>
                   <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('المخزون', 'Stock')}</th>
                   <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('الحالة', 'Status')}</th>
+                  <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('قائمة الانتظار', 'Waitlist')}</th>
                   <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('الإجراءات', 'Actions')}</th>
                 </tr>
               </thead>
@@ -151,6 +161,34 @@ export default function ProductsPage() {
                           ${product.is_available ? 'translate-x-6' : 'translate-x-1'}`} />
                       </button>
                     </td>
+
+                    {/* Waitlist count + notify button */}
+                    <td className="px-4 py-3">
+                      {product.waitlist_count > 0 ? (
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full text-xs font-bold">
+                            🔔 {product.waitlist_count}
+                          </span>
+                          <button
+                            onClick={() => {
+                              if (confirm(t(
+                                `إرسال إشعار لـ ${product.waitlist_count} عميل في قائمة الانتظار؟`,
+                                `Notify ${product.waitlist_count} customer(s) on the waitlist?`
+                              ))) {
+                                notifyWaitlistMutation.mutate(product.id);
+                              }
+                            }}
+                            disabled={notifyWaitlistMutation.isPending}
+                            className="text-amber-600 hover:bg-amber-50 border border-amber-300 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                          >
+                            {t('إشعار', 'Notify')}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-gray-300 text-xs">—</span>
+                      )}
+                    </td>
+
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
