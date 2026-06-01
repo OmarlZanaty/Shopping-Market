@@ -113,7 +113,7 @@ class DriverPerformanceView(APIView):
     def get(self, request):
         days = int(request.query_params.get('days', 30))
         cutoff = timezone.now() - timedelta(days=days)
-        drivers = User.objects.filter(role='driver', is_active=True)
+        drivers = User.objects.filter(role__in=['driver', 'preparer'], is_active=True)
         result = []
         for driver in drivers:
             orders = Order.objects.filter(
