@@ -278,7 +278,13 @@ class AdminUserListView(generics.ListAPIView):
     search_fields = ['full_name', 'phone', 'email']
 
     def get_queryset(self):
-        qs = User.objects.exclude(role='customer')
+        # Exclude customers by default, but allow listing them when explicitly
+        # requested via ?role=customer (the Clients page uses this endpoint too).
+        role_param = self.request.query_params.get('role')
+        if role_param == 'customer':
+            qs = User.objects.all()
+        else:
+            qs = User.objects.exclude(role='customer')
         store_id = getattr(self.request.user, 'store_id', None)
         if store_id is not None:
             qs = qs.filter(store_id=store_id)
