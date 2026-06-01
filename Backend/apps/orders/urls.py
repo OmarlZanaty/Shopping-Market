@@ -1,6 +1,7 @@
 from django.urls import path
 from . import views
 from . import legacy_views as legacy
+from . import admin_views as admin_v
 
 urlpatterns = [
     # ── Customer order endpoints ────────────────────────────────────────────
@@ -26,6 +27,8 @@ urlpatterns = [
     # New canonical paths live under /api/v1/agent/...; these old paths still
     # resolve so the existing client keeps working.
     path('<str:order_id>/accept/', legacy.LegacyDriverAcceptView.as_view(), name='legacy-accept'),
+    path('<str:order_id>/start-preparing/', legacy.LegacyDriverStartPreparingView.as_view(),
+         name='legacy-start-preparing'),
     path('<str:order_id>/start-delivery/', legacy.LegacyDriverStartDeliveryView.as_view(),
          name='legacy-start-delivery'),
     path('<str:order_id>/mark-delivered/', legacy.LegacyDriverMarkDeliveredView.as_view(),
@@ -39,6 +42,25 @@ urlpatterns = [
     path('<str:order_id>/add-item/', legacy.LegacyDriverAddItemView.as_view(),
          name='legacy-add-item'),
     path('driver/list/', legacy.LegacyDriverOrderListView.as_view(), name='legacy-driver-list'),
+
+    # ── Admin order endpoints (canonical scheme: /orders/admin/...) ─────────
+    # The admin dashboard follows the /<app>/admin/... convention used by every
+    # other app, so the order admin views are exposed here too. They map to the
+    # same views also served under /api/v1/admin/orders/...
+    # `all/` and `live/` MUST precede `admin/<order_id>/` so they aren't captured
+    # as an order id.
+    path('admin/all/', admin_v.AdminOrderListView.as_view(), name='orders-admin-list'),
+    path('admin/live/', admin_v.AdminOrdersLiveView.as_view(), name='orders-admin-live'),
+    path('admin/<str:order_id>/assign-preparer/', admin_v.AdminAssignPreparerView.as_view(),
+         name='orders-admin-assign-preparer'),
+    path('admin/<str:order_id>/assign-driver/', admin_v.AdminAssignDriverView.as_view(),
+         name='orders-admin-assign-driver'),
+    path('admin/<str:order_id>/cancel/', admin_v.AdminCancelOrderView.as_view(),
+         name='orders-admin-cancel'),
+    path('admin/<str:order_id>/return/', admin_v.AdminReturnOrderView.as_view(),
+         name='orders-admin-return'),
+    path('admin/<str:order_id>/', admin_v.AdminOrderDetailView.as_view(),
+         name='orders-admin-detail'),
 
     # Detail (catches anything that isn't a sub-route)
     path('<str:order_id>/', views.CustomerOrderDetailView.as_view(), name='order-detail'),
