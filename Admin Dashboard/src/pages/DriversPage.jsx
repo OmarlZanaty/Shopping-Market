@@ -157,7 +157,8 @@ export default function DriversPage() {
               </button>
               <button onClick={() => deleteMutation.mutate(confirmDelete.id)}
                 disabled={deleteMutation.isPending}
-                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2">
+                style={{ backgroundColor: '#dc2626', color: '#ffffff' }}
+                className="flex-1 px-4 py-2.5 hover:opacity-90 rounded-xl text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2">
                 {deleteMutation.isPending
                   ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />{t('جاري الحذف...', 'Deleting...')}</>
                   : t('حذف', 'Delete')}
