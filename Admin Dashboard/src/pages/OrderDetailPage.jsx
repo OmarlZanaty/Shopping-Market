@@ -15,7 +15,8 @@ export default function OrderDetailPage() {
   const qc = useQueryClient();
   const [showAssign, setShowAssign] = useState(false);
 
-  const { data: order, isLoading } = useQuery({ queryKey: ['order-detail', orderId], queryFn: () => orderApi.get(orderId).then(r => r.data) });
+  // Detail endpoint returns the { success, data: {...order} } envelope, so unwrap r.data.data.
+  const { data: order, isLoading } = useQuery({ queryKey: ['order-detail', orderId], queryFn: () => orderApi.get(orderId).then(r => r.data?.data ?? r.data) });
   const { data: driversData, isLoading: driversLoading } = useQuery({ queryKey: ['online-drivers'], queryFn: () => userApi.liveDrivers().then(r => r.data), enabled: showAssign });
 
   const assignMutation = useMutation({
@@ -47,11 +48,21 @@ export default function OrderDetailPage() {
           <h3 className="font-bold text-[#0D2440] text-sm mb-3 flex items-center gap-2">👤 {t('العميل', 'Customer')}</h3>
           <div className="space-y-1 text-sm"><div className="font-semibold">{order.delivery_name || '—'}</div><div className="text-gray-500">{order.delivery_phone}</div><div className="text-gray-500 text-xs">{order.delivery_address}</div>{order.building_number && <div className="text-xs text-gray-400">عمارة {order.building_number} - دور {order.floor_number} - شقة {order.apartment_number}</div>}{order.landmark && <div className="text-xs text-[#7BA4D0]">{order.landmark}</div>}</div>
         </div>
-        {/* Driver */}
+        {/* Agent (preparer + driver) */}
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-          <h3 className="font-bold text-[#0D2440] text-sm mb-3 flex items-center gap-2">🛵 {t('المندوب', 'Driver')}</h3>
-          {order.driver_info ? (
-            <div className="space-y-1 text-sm"><div className="font-semibold">{order.driver_info.name}</div><div className="text-gray-500">{order.driver_info.phone}</div><div className="flex items-center gap-1 text-[#FBBF24]">⭐ <span className="text-gray-700 text-xs">{order.driver_info.rating}</span></div></div>
+          <h3 className="font-bold text-[#0D2440] text-sm mb-3 flex items-center gap-2">🛵 {t('الموظف', 'Agent')}</h3>
+          {(order.preparer_info || order.driver_info) ? (
+            <div className="space-y-3 text-sm">
+              {order.preparer_info && (
+                <div><div className="text-xs text-gray-400">{t('محضّر الطلب', 'Preparer')}</div><div className="font-semibold">{order.preparer_info.name}</div><div className="text-gray-500">{order.preparer_info.phone}</div></div>
+              )}
+              {order.driver_info && (
+                <div><div className="text-xs text-gray-400">{t('مندوب التوصيل', 'Driver')}</div><div className="font-semibold">{order.driver_info.name}</div><div className="text-gray-500">{order.driver_info.phone}</div><div className="flex items-center gap-1 text-[#FBBF24]">⭐ <span className="text-gray-700 text-xs">{order.driver_info.rating}</span></div></div>
+              )}
+              {!order.driver_info && (
+                <button onClick={() => setShowAssign(true)} className="bg-[#F97316] text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-orange-600 transition-colors">+ {t('تعيين مندوب', 'Assign Driver')}</button>
+              )}
+            </div>
           ) : (
             <div><p className="text-gray-400 text-sm mb-3">{t('لم يتم التعيين', 'Not assigned yet')}</p><button onClick={() => setShowAssign(true)} className="bg-[#F97316] text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-orange-600 transition-colors">+ {t('تعيين مندوب', 'Assign Driver')}</button></div>
           )}
