@@ -2,9 +2,13 @@ import axios from 'axios';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://34.124.228.3:8000/api/v1';
 
+// NOTE: do NOT force a global 'Content-Type: application/json'. Axios already
+// sets application/json for plain-object bodies and multipart/form-data (with
+// the required boundary) for FormData. Forcing JSON here corrupts multipart
+// uploads, which silently broke every product create/update (image, price,
+// name, all fields) and any other file upload.
 export const api = axios.create({
   baseURL: BASE_URL,
-  headers: { 'Content-Type': 'application/json' },
 });
 
 // Attach JWT token
@@ -46,9 +50,12 @@ export const productApi = {
   create: (data) => api.post('/products/admin/products/create/', data),
   update: (id, data) => api.patch(`/products/admin/products/${id}/`, data),
   delete: (id) => api.delete(`/products/admin/products/${id}/`),
-  toggle: (id) => api.post(`/products/admin/products/${id}/toggle/`),
-  bulkPrice: (updates) => api.post('/products/admin/products/bulk-price/', { updates }),
+  toggle: (id) => api.patch(`/products/admin/products/${id}/availability/`),
+  bulkPrice: (updates) => api.post('/products/admin/products/bulk/', { updates }),
   byBarcode: (barcode) => api.get(`/products/barcode/${barcode}/`),
+  // Waitlist
+  waitlist: (id) => api.get(`/products/admin/products/${id}/waitlist/`),
+  notifyWaitlist: (id) => api.post(`/products/admin/products/${id}/notify-waitlist/`),
 };
 
 export const categoryApi = {
@@ -66,6 +73,12 @@ export const orderApi = {
 
 export const userApi = {
   list: (params) => api.get('/auth/admin/users/', { params }),
+  get:   (id) => api.get(`/auth/admin/users/${id}/`),
+  update:(id, data) => api.patch(`/auth/admin/users/${id}/`, data),
+  // Soft delete (deactivate + block). Pass {hard:true} for permanent DB removal
+  // (fails with 409 if the user still has linked orders / records).
+  delete:(id, { hard = false } = {}) =>
+    api.delete(`/auth/admin/users/${id}/${hard ? '?hard=true' : ''}`),
   block: (id) => api.post(`/auth/admin/users/${id}/block/`),
   drivers: (params) => api.get('/auth/admin/users/', { params: { ...params, role: 'driver' } }),
   createDriver: (data) => api.post('/auth/admin/staff/create/', { ...data, role: 'driver' }),

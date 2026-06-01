@@ -47,7 +47,8 @@ export default function ProductFormPage() {
         quantity_in_stock: productData.quantity_in_stock || '', low_stock_threshold: productData.low_stock_threshold || '5',
         sell_unit: productData.sell_unit || 'piece', min_order_quantity: productData.min_order_quantity || '1',
         max_order_quantity: productData.max_order_quantity || '', is_available: productData.is_available ?? true,
-        is_featured: productData.is_featured ?? false, category_ids: productData.category_ids || [],
+        is_featured: productData.is_featured ?? false,
+        category_ids: (productData.categories || []).map(c => c.id),
         alternative_ids: (productData.alternatives || []).map(p => p.id), related_ids: (productData.related || []).map(p => p.id),
       });
       if (productData.main_image_url) setImagePreview(productData.main_image_url);
