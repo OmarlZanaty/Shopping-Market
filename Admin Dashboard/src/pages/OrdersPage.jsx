@@ -111,7 +111,7 @@ export default function OrdersPage() {
                   {[
                     t('رقم الطلب', 'Order ID'),
                     t('العميل', 'Customer'),
-                    t('المندوب', 'Driver'),
+                    t('الموظف', 'Agent'),
                     t('الأصناف', 'Items'),
                     t('الدفع', 'Payment'),
                     t('المبلغ', 'Total'),
@@ -135,7 +135,7 @@ export default function OrdersPage() {
                       </td>
                       <td className="px-4 py-3 font-medium text-[#0D2440] whitespace-nowrap">{order.customer_name}</td>
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                        {order.driver_name || (
+                        {[order.preparer_name, order.driver_name].filter(Boolean).join(' / ') || (
                           <button
                             onClick={e => {
                               e.stopPropagation();
