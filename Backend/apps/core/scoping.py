@@ -54,4 +54,11 @@ def enforce_store_id_on_create(serializer, user):
     store_id = getattr(user, 'store_id', None)
     if store_id is not None:
         return serializer.save(store_id=store_id)
+    # Super Admin with no store: use store from payload, else the default store.
+    if serializer.validated_data.get('store') is not None:
+        return serializer.save()
+    from apps.stores.models import Store
+    default_store = Store.objects.order_by('id').first()
+    if default_store is not None:
+        return serializer.save(store_id=default_store.id)
     return serializer.save()

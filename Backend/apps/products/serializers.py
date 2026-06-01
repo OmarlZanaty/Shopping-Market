@@ -10,6 +10,10 @@ class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = '__all__'
+        extra_kwargs = {
+            # store is injected server-side (enforce_store_id_on_create)
+            'store': {'required': False},
+        }
 
     def get_product_count(self, obj):
         return obj.products.filter(is_available=True).count()
