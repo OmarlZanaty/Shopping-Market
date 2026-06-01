@@ -45,13 +45,13 @@ export default function SalesPage() {
         {/* Top Products */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
           <h2 className="font-bold text-[#0D2440] font-serif mb-4">{t('أكثر المنتجات مبيعاً','Top Selling Products')}</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={(products || []).slice(0,8)} layout="vertical">
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={(products || []).slice(0,8)} layout="vertical" margin={{ top: 5, right: 15, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis type="number" tick={{ fontSize: 9 }} />
-              <YAxis type="category" dataKey="product__name_ar" tick={{ fontSize: 9 }} width={80} />
+              <YAxis type="category" dataKey="product__name_ar" tick={{ fontSize: 11 }} width={140} orientation="right" interval={0} />
               <Tooltip formatter={(v) => [`${v} EGP`, t('الإيرادات','Revenue')]} />
-              <Bar dataKey="total_revenue" fill="#2E5E99" radius={[0, 4, 4, 0]} />
+              <Bar dataKey="total_revenue" fill="#2E5E99" radius={[4, 0, 0, 4]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
