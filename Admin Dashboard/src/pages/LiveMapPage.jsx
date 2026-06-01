@@ -165,8 +165,8 @@ export default function LiveMapPage() {
                   </div>
                 </div>
                 <div className="font-bold text-[#0D2440]">{order.total_amount} EGP</div>
-                <a href={`/orders/${order.order_id}`} className="bg-[#F97316] text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-orange-600 transition-colors">
-                  {t('تعيين', 'Assign')}
+                <a href={`/orders/${order.order_id}`} className="bg-[#2E5E99] text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-[#24487a] transition-colors">
+                  {t('عرض', 'View')}
                 </a>
               </div>
             ))}

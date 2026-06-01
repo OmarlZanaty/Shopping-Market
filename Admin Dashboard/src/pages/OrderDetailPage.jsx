@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useOutletContext, useParams, useNavigate } from 'react-router-dom';
-import { orderApi, userApi } from '../services/api';
-import toast from 'react-hot-toast';
+import { orderApi } from '../services/api';
 
 const STATUS_LABELS = { new:{ar:'جديد',en:'New',color:'bg-blue-100 text-blue-800'}, preparing:{ar:'يتم التحضير',en:'Preparing',color:'bg-yellow-100 text-yellow-800'}, out_for_delivery:{ar:'خرج للتوصيل',en:'Out for Delivery',color:'bg-orange-100 text-orange-800'}, delivered:{ar:'تم التسليم',en:'Delivered',color:'bg-green-100 text-green-800'}, cancelled:{ar:'ملغي',en:'Cancelled',color:'bg-red-100 text-red-700'} };
 const PAY_ICONS = { cash:'💵', card:'💳', wallet:'📱', points:'⭐', mixed:'🔄' };
@@ -12,17 +11,9 @@ export default function OrderDetailPage() {
   const t = (ar, en) => lang === 'ar' ? ar : en;
   const { orderId } = useParams();
   const navigate = useNavigate();
-  const qc = useQueryClient();
-  const [showAssign, setShowAssign] = useState(false);
 
   // Detail endpoint returns the { success, data: {...order} } envelope, so unwrap r.data.data.
   const { data: order, isLoading } = useQuery({ queryKey: ['order-detail', orderId], queryFn: () => orderApi.get(orderId).then(r => r.data?.data ?? r.data) });
-  const { data: driversData, isLoading: driversLoading } = useQuery({ queryKey: ['online-drivers'], queryFn: () => userApi.liveDrivers().then(r => r.data), enabled: showAssign });
-
-  const assignMutation = useMutation({
-    mutationFn: ({ driverId }) => orderApi.assignDriver(orderId, driverId),
-    onSuccess: () => { qc.invalidateQueries(['order-detail', orderId]); setShowAssign(false); toast.success(t('تم تعيين المندوب', 'Driver assigned')); },
-  });
 
   if (isLoading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-[#2E5E99] border-t-transparent rounded-full" /></div>;
   if (!order) return <div className="p-6 text-center text-gray-400">Order not found</div>;
@@ -59,12 +50,9 @@ export default function OrderDetailPage() {
               {order.driver_info && (
                 <div><div className="text-xs text-gray-400">{t('مندوب التوصيل', 'Driver')}</div><div className="font-semibold">{order.driver_info.name}</div><div className="text-gray-500">{order.driver_info.phone}</div><div className="flex items-center gap-1 text-[#FBBF24]">⭐ <span className="text-gray-700 text-xs">{order.driver_info.rating}</span></div></div>
               )}
-              {!order.driver_info && (
-                <button onClick={() => setShowAssign(true)} className="bg-[#F97316] text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-orange-600 transition-colors">+ {t('تعيين مندوب', 'Assign Driver')}</button>
-              )}
             </div>
           ) : (
-            <div><p className="text-gray-400 text-sm mb-3">{t('لم يتم التعيين', 'Not assigned yet')}</p><button onClick={() => setShowAssign(true)} className="bg-[#F97316] text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-orange-600 transition-colors">+ {t('تعيين مندوب', 'Assign Driver')}</button></div>
+            <p className="text-gray-400 text-sm">{t('لم يتم التعيين', 'Not assigned yet')}</p>
           )}
         </div>
         {/* Payment */}
@@ -118,28 +106,6 @@ export default function OrderDetailPage() {
                 </span>
               </div>
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* Assign Driver Modal */}
-      {showAssign && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-            <h3 className="font-bold text-[#0D2440] text-lg font-serif mb-4">{t('تعيين مندوب', 'Assign Driver')}</h3>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {driversLoading ? <div className="text-center py-8"><div className="animate-spin w-6 h-6 border-4 border-[#2E5E99] border-t-transparent rounded-full mx-auto" /></div>
-                : (driversData || []).filter(d => d.is_online).map(driver => (
-                <button key={driver.id} onClick={() => assignMutation.mutate({ driverId: driver.id })}
-                  className="w-full flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:border-[#2E5E99] hover:bg-[#E7F0FA] transition-all text-start">
-                  <div className="w-9 h-9 bg-[#2E5E99] rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0">{driver.full_name?.[0]}</div>
-                  <div><div className="font-semibold text-[#0D2440] text-sm">{driver.full_name}</div><div className="text-xs text-gray-400">{driver.phone} · ⭐ {driver.rating}</div></div>
-                  <div className="ms-auto"><span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">{t('متاح','Online')}</span></div>
-                </button>
-              ))}
-              {!driversLoading && (driversData || []).filter(d => d.is_online).length === 0 && <div className="text-center py-8 text-gray-400 text-sm">{t('لا يوجد مناديب متاحين', 'No drivers online')}</div>}
-            </div>
-            <button onClick={() => setShowAssign(false)} className="mt-4 w-full py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50">{t('إلغاء','Cancel')}</button>
           </div>
         </div>
       )}

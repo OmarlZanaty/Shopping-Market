@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useOutletContext, useNavigate } from 'react-router-dom';
-import { orderApi, userApi } from '../services/api';
-import toast from 'react-hot-toast';
+import { orderApi } from '../services/api';
 
 const STATUS_CONFIG = {
   new:              { ar: 'جديد',           en: 'New',              color: 'bg-blue-100 text-blue-800',   dot: 'bg-blue-500' },
@@ -18,13 +17,10 @@ export default function OrdersPage() {
   const { lang } = useOutletContext();
   const t = (ar, en) => lang === 'ar' ? ar : en;
   const navigate = useNavigate();
-  const qc = useQueryClient();
 
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [showAssign, setShowAssign] = useState(false);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['admin-orders', statusFilter, search, page],
@@ -35,23 +31,6 @@ export default function OrdersPage() {
       ordering: '-created_at'
     }).then(r => r.data),
     refetchInterval: 15000, // Poll every 15s
-  });
-
-  const { data: driversData } = useQuery({
-    queryKey: ['online-drivers'],
-    queryFn: () => userApi.liveDrivers().then(r => r.data),
-    enabled: showAssign,
-  });
-
-  const assignMutation = useMutation({
-    mutationFn: ({ orderId, driverId }) => orderApi.assignDriver(orderId, driverId),
-    onSuccess: () => {
-      qc.invalidateQueries(['admin-orders']);
-      setShowAssign(false);
-      setSelectedOrder(null);
-      toast.success(t('تم تعيين المندوب', 'Driver assigned'));
-    },
-    onError: () => toast.error(t('خطأ في التعيين', 'Assignment failed')),
   });
 
   const orders = data?.results || [];
@@ -136,16 +115,7 @@ export default function OrdersPage() {
                       <td className="px-4 py-3 font-medium text-[#0D2440] whitespace-nowrap">{order.customer_name}</td>
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                         {[order.preparer_name, order.driver_name].filter(Boolean).join(' / ') || (
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              setSelectedOrder(order);
-                              setShowAssign(true);
-                            }}
-                            className="text-xs bg-[#F97316] text-white px-2 py-1 rounded-lg font-semibold hover:bg-orange-600 transition-colors"
-                          >
-                            + {t('تعيين', 'Assign')}
-                          </button>
+                          <span className="text-gray-300">—</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-center font-semibold text-gray-700">{order.items_count}</td>
@@ -202,53 +172,6 @@ export default function OrdersPage() {
           </div>
         )}
       </div>
-
-      {/* Assign Driver Modal */}
-      {showAssign && selectedOrder && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-            <h3 className="font-bold text-[#0D2440] text-lg font-serif mb-1">
-              {t('تعيين مندوب', 'Assign Driver')}
-            </h3>
-            <p className="text-sm text-gray-500 mb-4">
-              {t(`للطلب رقم ${selectedOrder.order_id}`, `Order ${selectedOrder.order_id}`)}
-            </p>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {(driversData || []).filter(d => d.is_online).map(driver => (
-                <button
-                  key={driver.id}
-                  onClick={() => assignMutation.mutate({ orderId: selectedOrder.order_id, driverId: driver.id })}
-                  className="w-full flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:border-[#2E5E99] hover:bg-[#E7F0FA] transition-all text-start"
-                >
-                  <div className="w-9 h-9 bg-[#2E5E99] rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                    {driver.full_name?.[0]}
-                  </div>
-                  <div>
-                    <div className="font-semibold text-[#0D2440] text-sm">{driver.full_name}</div>
-                    <div className="text-xs text-gray-400">{driver.phone} · ⭐ {driver.rating}</div>
-                  </div>
-                  <div className="ms-auto">
-                    <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">
-                      {t('متاح', 'Online')}
-                    </span>
-                  </div>
-                </button>
-              ))}
-              {(driversData || []).filter(d => d.is_online).length === 0 && (
-                <div className="text-center py-8 text-gray-400 text-sm">
-                  {t('لا يوجد مناديب متاحين الآن', 'No drivers online right now')}
-                </div>
-              )}
-            </div>
-            <button
-              onClick={() => { setShowAssign(false); setSelectedOrder(null); }}
-              className="mt-4 w-full py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              {t('إلغاء', 'Cancel')}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
