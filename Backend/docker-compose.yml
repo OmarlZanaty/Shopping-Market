@@ -49,11 +49,26 @@ services:
       - mediafiles:/app/media
     ports:
       - "8000:8000"
+    # migrate + collectstatic must succeed; seeding is best-effort so a seed
+    # hiccup can't black out the API. Served by gunicorn with 3 Uvicorn workers
+    # and a 60s request timeout: one hung worker is killed + respawned instead
+    # of wedging the whole site (the old single bare-uvicorn worker could hang
+    # with the container still "Up", which restart:always never caught).
     command: >
-      sh -c "python manage.py migrate &&
+      sh -c "python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
-             python manage.py seed_default_store &&
-             uvicorn config.asgi:application --host 0.0.0.0 --port 8000"
+             (python manage.py seed_default_store || echo '[startup] seed_default_store skipped') &&
+             gunicorn config.asgi:application
+               -k uvicorn.workers.UvicornWorker
+               --workers 3 --bind 0.0.0.0:8000
+               --timeout 60 --graceful-timeout 30
+               --access-logfile - --error-logfile -"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health/', timeout=4).status==200 else 1)\""]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 45s
 
   celery-worker:
     build: .
