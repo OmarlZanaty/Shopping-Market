@@ -274,17 +274,23 @@ class AdminUserListView(generics.ListAPIView):
     """All STAFF users (preparer/driver/admin/branch_manager/support). Store-scoped."""
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
-    filterset_fields = ['role', 'is_active', 'branch']
+    filterset_fields = ['is_active', 'branch']
     search_fields = ['full_name', 'phone', 'email']
 
     def get_queryset(self):
-        # Exclude customers by default, but allow listing them when explicitly
-        # requested via ?role=customer (the Clients page uses this endpoint too).
+        # Role filtering is handled here to support comma-separated values
+        # (e.g. ?role=preparer,driver for the Agents page).
         role_param = self.request.query_params.get('role')
-        if role_param == 'customer':
+        roles = [r.strip() for r in role_param.split(',')] if role_param else []
+
+        if 'customer' in roles:
             qs = User.objects.all()
         else:
             qs = User.objects.exclude(role='customer')
+
+        if roles:
+            qs = qs.filter(role__in=roles)
+
         store_id = getattr(self.request.user, 'store_id', None)
         if store_id is not None:
             qs = qs.filter(store_id=store_id)

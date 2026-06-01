@@ -80,7 +80,7 @@ export const userApi = {
   delete:(id, { hard = false } = {}) =>
     api.delete(`/auth/admin/users/${id}/${hard ? '?hard=true' : ''}`),
   block: (id) => api.post(`/auth/admin/users/${id}/block/`),
-  drivers: (params) => api.get('/auth/admin/users/', { params: { ...params, role: 'driver' } }),
+  drivers: (params) => api.get('/auth/admin/users/', { params: { ...params, role: 'preparer,driver' } }),
   createDriver: (data) => api.post('/auth/admin/staff/create/', { ...data, role: 'driver' }),
   createStaff:  (data) => api.post('/auth/admin/staff/create/', data),
   liveDrivers: () => api.get('/auth/admin/drivers/live/'),
