@@ -27,11 +27,20 @@ class LegacyDriverAcceptView(APIView):
         return av.AgentAcceptOrderView().patch(request, order_id)
 
 
-class LegacyDriverStartDeliveryView(APIView):
+class LegacyDriverStartPreparingView(APIView):
+    """POST /orders/<id>/start-preparing/ — accepted → preparing."""
     permission_classes = [permissions.IsAuthenticated, IsAgent]
 
     def post(self, request, order_id):
-        return av.AgentPickedUpView().patch(request, order_id)
+        return av.AgentStartPreparingView().patch(request, order_id)
+
+
+class LegacyDriverStartDeliveryView(APIView):
+    """POST /orders/<id>/start-delivery/ — preparing → out_for_delivery (order ready)."""
+    permission_classes = [permissions.IsAuthenticated, IsAgent]
+
+    def post(self, request, order_id):
+        return av.AgentReadyView().patch(request, order_id)
 
 
 class LegacyDriverMarkDeliveredView(APIView):
