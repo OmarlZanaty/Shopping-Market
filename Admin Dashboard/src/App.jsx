@@ -58,6 +58,7 @@ export default function App() {
             <Route path="users"                 element={<S><UsersPage /></S>} />
             <Route path="drivers"               element={<S><DriversPage /></S>} />
             <Route path="drivers/new"           element={<S><DriverFormPage /></S>} />
+            <Route path="drivers/:id/edit"      element={<S><DriverFormPage /></S>} />
             <Route path="live-map"              element={<S><LiveMapPage /></S>} />
             <Route path="banners"               element={<S><BannersPage /></S>} />
             <Route path="media"                 element={<S><MediaLibraryPage /></S>} />
