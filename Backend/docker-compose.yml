@@ -54,15 +54,18 @@ services:
     # and a 60s request timeout: one hung worker is killed + respawned instead
     # of wedging the whole site (the old single bare-uvicorn worker could hang
     # with the container still "Up", which restart:always never caught).
-    command: >
-      sh -c "python manage.py migrate --noinput &&
-             python manage.py collectstatic --noinput &&
-             (python manage.py seed_default_store || echo '[startup] seed_default_store skipped') &&
-             gunicorn config.asgi:application
-               -k uvicorn.workers.UvicornWorker
-               --workers 3 --bind 0.0.0.0:8000
-               --timeout 60 --graceful-timeout 30
-               --access-logfile - --error-logfile -"
+    # NOTE: keep the gunicorn invocation on ONE line. A YAML folded scalar
+    # preserves newlines on extra-indented lines, which would split the flags
+    # off inside `sh -c "..."` and silently drop -k (gunicorn then falls back to
+    # its sync WSGI worker and fails on the ASGI app).
+    command:
+      - sh
+      - -c
+      - >-
+        python manage.py migrate --noinput &&
+        python manage.py collectstatic --noinput &&
+        (python manage.py seed_default_store || echo '[startup] seed_default_store skipped') &&
+        exec gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --workers 3 --bind 0.0.0.0:8000 --timeout 60 --graceful-timeout 30 --access-logfile - --error-logfile -
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health/', timeout=4).status==200 else 1)\""]
       interval: 30s
