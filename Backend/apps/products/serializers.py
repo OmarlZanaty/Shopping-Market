@@ -207,6 +207,18 @@ class BannerSerializer(serializers.ModelSerializer):
     def validate_image(self, value):
         return validate_image_upload(value)
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Resolve a usable image_url from the uploaded file when not set explicitly.
+        if not data.get('image_url') and instance.image:
+            request = self.context.get('request')
+            try:
+                url = instance.image.url
+                data['image_url'] = request.build_absolute_uri(url) if request else url
+            except Exception:
+                pass
+        return data
+
 
 class MediaLibrarySerializer(serializers.ModelSerializer):
     class Meta:
