@@ -204,9 +204,14 @@ class CustomerRatingReportView(APIView):
             total=Count('id'),
             one_star=Count('id', filter=Q(delivery_rating=1)),
         )
+        from django.db.models.functions import Coalesce
         by_driver = (OrderRating.objects
                      .filter(created_at__gte=cutoff)
-                     .values('order__driver__full_name', 'order__driver__phone')
+                     .annotate(
+                         agent_name=Coalesce('order__driver__full_name', 'order__preparer__full_name'),
+                         agent_phone=Coalesce('order__driver__phone', 'order__preparer__phone'),
+                     )
+                     .values('agent_name', 'agent_phone')
                      .annotate(
                          avg_rating=Avg('delivery_rating'),
                          count=Count('id'),

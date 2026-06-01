@@ -37,8 +37,8 @@ export default function RatingsPage() {
             <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-gray-50 border-b border-gray-100"><tr>{[t('المندوب','Driver'),t('هاتفه','Phone'),t('متوسط التقييم','Avg Rating'),t('عدد التقييمات','Count'),t('تقييمات سيئة','Bad Reviews')].map(h => <th key={h} className="px-4 py-2.5 text-start text-xs font-semibold text-gray-500 uppercase">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-gray-50">{byDriver.map((d,i) => (
               <tr key={i} className={`hover:bg-gray-50 ${Number(d.avg_rating) < 3 ? 'bg-red-50' : ''}`}>
-                <td className="px-4 py-3 font-semibold text-[#0D2440]">{d.order__driver__full_name||'—'}</td>
-                <td className="px-4 py-3 text-xs text-gray-400">{d.order__driver__phone}</td>
+                <td className="px-4 py-3 font-semibold text-[#0D2440]">{d.agent_name||'—'}</td>
+                <td className="px-4 py-3 text-xs text-gray-400">{d.agent_phone}</td>
                 <td className="px-4 py-3"><div className="flex items-center gap-1">{'★'.repeat(Math.round(Number(d.avg_rating||0)))}<span className="text-xs text-gray-400 ms-1">({Number(d.avg_rating||0).toFixed(1)})</span></div></td>
                 <td className="px-4 py-3 font-bold">{d.count}</td>
                 <td className="px-4 py-3"><span className={`text-xs font-bold px-2 py-1 rounded-full ${d.bad>0?'bg-red-100 text-red-600':'bg-green-100 text-green-700'}`}>{d.bad}</span></td>
