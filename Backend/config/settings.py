@@ -41,6 +41,14 @@ INSTALLED_APPS = [
     'apps.analytics',
 ]
 
+# Optional work-in-progress apps. They are NOT committed to the repo, so the
+# production image doesn't contain them — enabling them there crashes startup
+# ("model … isn't in an application in INSTALLED_APPS"). Gate them behind a flag
+# (off by default); set ENABLE_WIP_APPS=true locally where the apps exist.
+ENABLE_WIP_APPS = config('ENABLE_WIP_APPS', default=False, cast=bool)
+if ENABLE_WIP_APPS:
+    INSTALLED_APPS += ['apps.payments', 'apps.ai']
+
 MIDDLEWARE = [
     'apps.core.middleware.RequestIDMiddleware',
     'django.middleware.security.SecurityMiddleware',
@@ -120,9 +128,10 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-# JWT — spec: 15 min access, 30 day refresh.
+# JWT — 2 h access (was 15 min — too short for a shopping session),
+#        30 day sliding refresh, rotate + blacklist on every use.
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=2),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
@@ -213,7 +222,10 @@ FIREBASE_SERVICE_ACCOUNT_JSON = config('FIREBASE_SERVICE_ACCOUNT_JSON', default=
 # Payment Gateways
 PAYMOB_API_KEY = config('PAYMOB_API_KEY', default='')
 PAYMOB_INTEGRATION_ID = config('PAYMOB_INTEGRATION_ID', default='')
+PAYMOB_IFRAME_ID = config('PAYMOB_IFRAME_ID', default='')
+PAYMOB_HMAC_SECRET = config('PAYMOB_HMAC_SECRET', default='')
 FAWRY_MERCHANT_CODE = config('FAWRY_MERCHANT_CODE', default='')
+GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 
 # OTP provider
 SMS_PROVIDER = config('SMS_PROVIDER', default='log')  # 'log' | 'vonage' | 'twilio'
@@ -252,6 +264,20 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TIME_LIMIT = 5 * 60
 CELERY_TASK_SOFT_TIME_LIMIT = 4 * 60
+
+from celery.schedules import crontab  # noqa: E402
+CELERY_BEAT_SCHEDULE = {}
+if ENABLE_WIP_APPS:
+    CELERY_BEAT_SCHEDULE.update({
+        'ai-recompute-recommendations': {
+            'task': 'apps.ai.tasks.recompute_all_recommendations',
+            'schedule': crontab(hour=2, minute=0),      # 02:00 Cairo nightly
+        },
+        'ai-recompute-trending': {
+            'task': 'apps.ai.tasks.recompute_trending',
+            'schedule': crontab(minute=0),              # every hour
+        },
+    })
 
 # ── Logging (structured) ──────────────────────────────────────────────────────
 LOGGING = {

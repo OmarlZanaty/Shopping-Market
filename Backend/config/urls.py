@@ -28,8 +28,6 @@ urlpatterns = [
     path('api/v1/ratings/', include(('apps.orders.rating_urls', 'ratings'), namespace='ratings')),
     path('api/v1/reports/', include(('apps.analytics.reports.urls', 'reports'), namespace='reports')),
     path('api/v1/analytics/', include('apps.analytics.urls')),
-    path('api/v1/payments/', include(('apps.payments.urls', 'payments'), namespace='payments')),
-    path('api/v1/ai/', include(('apps.ai.urls', 'ai'), namespace='ai')),
     path('api/v1/', include(('apps.core.urls', 'core'), namespace='core')),
 
     # ───────── Spec-shape aliases (no v1 prefix, matches the prompt verbatim) ─────────
