@@ -218,6 +218,12 @@ class FirebaseTokenLoginView(APIView):
             local_phone = firebase_phone[2:]
         else:
             local_phone = firebase_phone.lstrip('+')
+        # E.164 drops the national trunk "0". Egyptian mobiles are 11 digits
+        # (01XXXXXXXXX), so re-add the leading 0 if it was stripped — otherwise
+        # we create a phantom account ("1067189023") that never matches the real
+        # one ("01067189023").
+        if len(local_phone) == 10 and local_phone.startswith('1'):
+            local_phone = '0' + local_phone
 
         # Validate
         try:
