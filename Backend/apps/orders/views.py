@@ -174,11 +174,11 @@ class CustomerApproveAdjustmentView(APIView):
                         pass
             elif adj.action_type in ('substitute_suggested', 'substitute'):
                 if approved and item:
-                    item.status = OrderItem.ItemStatus.SUBSTITUTED
-                    item.save(update_fields=['status'])
-                    # promote pending substitute item if exists
+                    # Swap the line to the approved substitute (new product + price).
+                    item.apply_substitute()
                 elif item:
-                    item.status = OrderItem.ItemStatus.REJECTED
+                    # Declined → original stays unavailable, so it isn't charged.
+                    item.status = OrderItem.ItemStatus.UNAVAILABLE
                     item.save(update_fields=['status'])
             elif adj.action_type in ('weight_diff_sent',):
                 if item:
@@ -191,9 +191,52 @@ class CustomerApproveAdjustmentView(APIView):
                     item.status = OrderItem.ItemStatus.REMOVED
                     item.save(update_fields=['status'])
 
+            old_total = order.total_amount  # capture before recalculate
             order.calculate_totals()
+            new_total = order.total_amount
 
-        # Notify the agent
+        # ── Post-approval: wallet refund (price decreased) ────────────────────
+        wallet_refund = None
+        if approved and adj.action_type == 'price_change':
+            try:
+                diff = float(old_total) - float(new_total)
+                if diff > 0:
+                    # Order was paid online or via wallet — refund excess to wallet
+                    if order.payment_method in (
+                        Order.PaymentMethod.ONLINE,
+                        Order.PaymentMethod.WALLET,
+                    ):
+                        from apps.users.models import WalletTransaction
+                        new_balance = float(
+                            getattr(request.user, 'wallet_balance', 0) or 0
+                        ) + diff
+                        request.user.wallet_balance = new_balance
+                        request.user.save(update_fields=['wallet_balance'])
+                        WalletTransaction.objects.create(
+                            user=request.user,
+                            type=WalletTransaction.Type.CREDIT,
+                            amount=diff,
+                            reason=WalletTransaction.Reason.REFUND,
+                            reference_id=str(order.id),
+                            reference_type='order',
+                            balance_after=new_balance,
+                        )
+                        wallet_refund = round(diff, 2)
+                        # Notify customer about wallet refund
+                        from apps.notifications.utils import send_push_notification
+                        send_push_notification(
+                            user=request.user,
+                            title_ar='تم إضافة المبلغ لمحفظتك 💰',
+                            title_en='Wallet refund applied',
+                            body_ar=f'تم إضافة {diff:.2f} جنيه لمحفظتك',
+                            body_en=f'{diff:.2f} EGP refunded to your wallet',
+                            data={'type': 'wallet_refund', 'amount': str(round(diff, 2)),
+                                  'order_id': str(order.id)},
+                        )
+            except Exception:
+                pass
+
+        # ── Notify the agent ──────────────────────────────────────────────────
         try:
             from apps.notifications.utils import send_push_notification
             agent = adj.preparer or adj.driver
@@ -210,11 +253,33 @@ class CustomerApproveAdjustmentView(APIView):
         except Exception:
             pass
 
-        return ok({
+        # ── Determine if a top-up payment is needed (price increased) ─────────
+        payment_required = False
+        try:
+            if approved and adj.action_type == 'price_change':
+                diff_owed = float(new_total) - float(old_total)
+                if diff_owed > 0 and order.payment_method == Order.PaymentMethod.ONLINE:
+                    payment_required = True
+                    adj.new_total = new_total
+                    adj.save(update_fields=['new_total'])
+        except Exception:
+            pass
+
+        response_data = {
             'approved': approved,
             'new_total': str(order.total_amount),
             'adjustment_id': adj.id,
-        })
+            'payment_required': payment_required,
+        }
+        if wallet_refund is not None:
+            response_data['wallet_refund'] = wallet_refund
+        if payment_required:
+            try:
+                response_data['amount_owed'] = str(round(float(new_total) - float(old_total), 2))
+            except Exception:
+                pass
+
+        return ok(response_data)
 
 
 class CustomerAddItemView(APIView):

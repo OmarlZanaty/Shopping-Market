@@ -135,9 +135,13 @@ class LegacyApproveAdjustmentView(APIView):
                 except (TypeError, ValueError):
                     pass
             elif adj.action_type in ('substitute_suggested', 'substitute') and item:
-                item.status = (OrderItem.ItemStatus.SUBSTITUTED if approved
-                               else OrderItem.ItemStatus.REJECTED)
-                item.save(update_fields=['status'])
+                if approved:
+                    # Swap the line to the approved substitute (new product + price).
+                    item.apply_substitute()
+                else:
+                    # Declined → original stays unavailable, so it isn't charged.
+                    item.status = OrderItem.ItemStatus.UNAVAILABLE
+                    item.save(update_fields=['status'])
             elif adj.action_type == 'weight_diff_sent' and item:
                 item.weight_difference_approved = approved
                 if approved:

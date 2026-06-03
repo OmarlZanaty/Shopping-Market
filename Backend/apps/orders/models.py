@@ -388,6 +388,34 @@ class OrderItem(models.Model):
             pass
         return 0
 
+    def apply_substitute(self):
+        """Replace this line's product with its approved substitute, in place,
+        so the order list shows the NEW product and the total uses its price.
+
+        Called when the customer approves a SUBSTITUTE_SUGGESTED adjustment. The
+        suggestion step left this item UNAVAILABLE (dropped from the total);
+        here we swap in the substitute and mark it SUBSTITUTED so line_total
+        counts it again at the new price. No-op swap if no substitute is set."""
+        sub = self.substitute_product
+        if not sub:
+            self.status = OrderItem.ItemStatus.SUBSTITUTED
+            self.save(update_fields=['status'])
+            return
+        self.product = sub
+        self.product_name_ar = sub.name_ar
+        self.product_name_en = sub.name_en
+        self.product_barcode = sub.barcode or ''
+        self.unit_type = sub.sell_unit
+        self.unit_price = sub.current_price
+        self.final_unit_price = sub.current_price
+        self.status = OrderItem.ItemStatus.SUBSTITUTED
+        self.customer_approved = True
+        self.save(update_fields=[
+            'product', 'product_name_ar', 'product_name_en', 'product_barcode',
+            'unit_type', 'unit_price', 'final_unit_price', 'status',
+            'customer_approved',
+        ])
+
 
 class OrderAdjustment(models.Model):
     class AdjustmentType(models.TextChoices):
