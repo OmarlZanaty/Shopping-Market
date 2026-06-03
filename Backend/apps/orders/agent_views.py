@@ -896,11 +896,27 @@ class AgentProductDetailView(APIView):
             except Exception:
                 pass
 
+        # Recompute the image URL so the client can show the new image
+        # immediately after upload (same logic as GET).
+        product.refresh_from_db()
+        image_url = product.image_url_s3 or product.thumbnail_url or ''
+        if not image_url and product.main_image:
+            try:
+                image_url = request.build_absolute_uri(product.main_image.url)
+            except Exception:
+                image_url = ''
+        # Cache-buster: a re-uploaded image can reuse the same filename/URL, so
+        # append a timestamp to force the client to fetch the new bytes.
+        if image_url and 'main_image' in update_fields:
+            sep = '&' if '?' in image_url else '?'
+            image_url = f'{image_url}{sep}t={int(timezone.now().timestamp())}'
+
         return ok({
             'id': str(product.id),
             'updated_fields': update_fields,
             'is_available': product.is_available,
             'is_active': product.is_active,
+            'image_url': image_url,
         })
 
 
