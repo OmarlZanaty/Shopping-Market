@@ -16,8 +16,9 @@ export default function UsersPage() {
     queryFn: () => userApi.list({ search, role: 'customer', page }).then(r => r.data),
   });
   const blockMutation = useMutation({
-    mutationFn: (id) => userApi.block(id),
+    mutationFn: ({ id, block }) => userApi.block(id, block),
     onSuccess: () => { qc.invalidateQueries(['customers']); toast.success(t('تم تحديث الحالة','Status updated')); },
+    onError: () => toast.error(t('فشل تحديث الحالة','Failed to update status')),
   });
 
   const users = data?.results || [];
@@ -36,17 +37,22 @@ export default function UsersPage() {
                 <tr>{[t('العميل','Customer'), t('الهاتف','Phone'), t('الرصيد','Wallet'), t('النقاط','Points'), t('الطلبات','Orders'), t('الحالة','Status'), t('إجراءات','Actions')].map(h => <th key={h} className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{h}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {users.map(user => (
+                {users.map(user => {
+                  // A user is blocked if either flag says so (the two can drift
+                  // apart; login checks both, so the dashboard should too).
+                  const isBlocked = user.is_blocked || !user.is_active;
+                  return (
                   <tr key={user.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3"><div className="flex items-center gap-2"><div className="w-8 h-8 bg-[#E7F0FA] rounded-full flex items-center justify-center text-[#2E5E99] font-bold text-sm">{user.full_name?.[0]}</div><span className="font-medium text-[#0D2440]">{user.full_name}</span></div></td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-600">{user.phone}</td>
                     <td className="px-4 py-3 text-[#2FBE8F] font-semibold">{user.wallet_balance} EGP</td>
                     <td className="px-4 py-3"><span className="bg-[#FFF7ED] text-[#F97316] font-bold text-xs px-2 py-1 rounded-full">⭐ {user.loyalty_points}</span></td>
                     <td className="px-4 py-3 text-center font-semibold">{user.order_streak || 0}</td>
-                    <td className="px-4 py-3"><span className={`text-xs font-semibold px-2 py-1 rounded-full ${user.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>{user.is_active ? t('نشط','Active') : t('محظور','Blocked')}</span></td>
-                    <td className="px-4 py-3"><button onClick={() => blockMutation.mutate(user.id)} className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${user.is_active ? 'text-orange-600 hover:bg-orange-50' : 'text-green-600 hover:bg-green-50'}`}>{user.is_active ? t('حظر','Block') : t('تفعيل','Activate')}</button></td>
+                    <td className="px-4 py-3"><span className={`text-xs font-semibold px-2 py-1 rounded-full ${isBlocked ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>{isBlocked ? t('محظور','Blocked') : t('نشط','Active')}</span></td>
+                    <td className="px-4 py-3"><button disabled={blockMutation.isPending} onClick={() => blockMutation.mutate({ id: user.id, block: !isBlocked })} className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 ${isBlocked ? 'text-green-600 hover:bg-green-50' : 'text-orange-600 hover:bg-orange-50'}`}>{isBlocked ? t('تفعيل','Activate') : t('حظر','Block')}</button></td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
             {users.length === 0 && <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-2">👥</div><div>{t('لا يوجد عملاء','No customers found')}</div></div>}

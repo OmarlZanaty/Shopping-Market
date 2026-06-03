@@ -79,7 +79,9 @@ export const userApi = {
   // (fails with 409 if the user still has linked orders / records).
   delete:(id, { hard = false } = {}) =>
     api.delete(`/auth/admin/users/${id}/${hard ? '?hard=true' : ''}`),
-  block: (id) => api.post(`/auth/admin/users/${id}/block/`),
+  // Block (block=true) or reactivate (block=false). Backend expects PATCH with
+  // a {block} flag and sets is_blocked + is_active together.
+  block: (id, block = true) => api.patch(`/auth/admin/users/${id}/block/`, { block }),
   drivers: (params) => api.get('/auth/admin/users/', { params: { ...params, role: 'preparer,driver' } }),
   createDriver: (data) => api.post('/auth/admin/staff/create/', { ...data, role: 'driver' }),
   createStaff:  (data) => api.post('/auth/admin/staff/create/', data),
