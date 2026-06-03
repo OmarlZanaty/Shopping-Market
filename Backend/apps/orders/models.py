@@ -371,6 +371,10 @@ class OrderItem(models.Model):
 
     @property
     def line_total(self):
+        # Unavailable / removed items don't count toward the order total.
+        if self.status in (OrderItem.ItemStatus.UNAVAILABLE,
+                            OrderItem.ItemStatus.REMOVED):
+            return 0
         price = self.final_unit_price or self.unit_price
         qty = self.delivered_quantity or self.actual_qty or self.quantity
         return price * qty

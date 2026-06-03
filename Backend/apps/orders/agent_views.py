@@ -339,6 +339,8 @@ class AgentItemUnavailableView(APIView):
             return err
         item.status = OrderItem.ItemStatus.UNAVAILABLE
         item.save(update_fields=['status'])
+        # Drop the item's amount from the order total.
+        item.order.calculate_totals()
         adj = OrderAdjustment.objects.create(
             order=item.order, order_item=item,
             preparer=request.user if request.user.role == 'preparer' else None,
@@ -545,6 +547,8 @@ class AgentItemResetView(APIView):
         item.status = OrderItem.ItemStatus.PENDING
         item.actual_qty = None
         item.save(update_fields=['status', 'actual_qty'])
+        # Restore the item's amount back into the order total.
+        item.order.calculate_totals()
         return ok({'status': 'pending', 'item_id': item.id})
 
 
