@@ -33,6 +33,7 @@ urlpatterns = [
          name='agent-item-remove'),
 
     # Inventory
+    path('inventory/categories/', v.AgentCategoryListView.as_view(), name='agent-inventory-categories'),
     path('inventory/products/', v.AgentInventoryListView.as_view(), name='agent-inventory-products'),
     path('inventory/products/<uuid:product_id>/', v.AgentProductDetailView.as_view(), name='agent-inventory-product-detail'),
     path('inventory/scan/<str:barcode>/', v.AgentInventoryScanView.as_view(), name='agent-inventory-scan'),

@@ -18,7 +18,7 @@ from .serializers import (
     SubstituteItemSerializer, AddItemSerializer, DriverDeliveredSerializer,
     ActionLogSerializer, OrderAdjustmentSerializer,
 )
-from apps.products.models import Product, ProductBranch
+from apps.products.models import Product, ProductBranch, Category
 from apps.users.models import DataShareLog
 from apps.core.permissions import IsAgent, IsPreparer, IsDriver
 from apps.core.responses import ok, fail
@@ -881,6 +881,39 @@ class AgentProductDetailView(APIView):
             product.main_image = request.FILES['main_image']
             update_fields.append('main_image')
 
+        # ── Categories (many-to-many) ─────────────────────────────────────────
+        # A product can belong to several categories. Accept the IDs in any of
+        # the shapes the client might send: a real JSON list (clean JSON body),
+        # repeated form fields (multipart), a JSON-encoded string, or CSV.
+        # `.set()` applies immediately (no update_fields needed), so it runs
+        # even when no scalar field changed.
+        has_cats = ('category_ids' in data) or (
+            hasattr(data, 'getlist') and bool(data.getlist('category_ids')))
+        if has_cats:
+            raw = data.get('category_ids')
+            ids = []
+            if isinstance(raw, (list, tuple)):
+                ids = list(raw)
+            elif hasattr(data, 'getlist') and data.getlist('category_ids'):
+                ids = data.getlist('category_ids')
+            elif isinstance(raw, str) and raw.strip():
+                try:
+                    import json as _json
+                    parsed = _json.loads(raw)
+                    ids = parsed if isinstance(parsed, list) else [parsed]
+                except Exception:
+                    ids = [x for x in raw.split(',') if str(x).strip()]
+            clean_ids = []
+            for x in ids:
+                try:
+                    clean_ids.append(int(x))
+                except (ValueError, TypeError):
+                    pass
+            valid = Category.objects.filter(id__in=clean_ids)
+            if product.store_id:
+                valid = valid.filter(store_id=product.store_id)
+            product.categories.set(list(valid))
+
         if update_fields:
             try:
                 product.save(update_fields=update_fields)
@@ -917,7 +950,23 @@ class AgentProductDetailView(APIView):
             'is_available': product.is_available,
             'is_active': product.is_active,
             'image_url': image_url,
+            'categories': list(product.categories.values('id', 'name_ar', 'name_en')),
         })
+
+
+# ─── Categories (for product assignment) ──────────────────────────────────────
+
+class AgentCategoryListView(APIView):
+    """GET /agent/inventory/categories/ — categories of the agent's store, used
+    to assign a product to one or more categories from the inventory editor."""
+    permission_classes = [permissions.IsAuthenticated, IsAgent]
+
+    def get(self, request):
+        qs = Category.objects.all()
+        if request.user.store_id:
+            qs = qs.filter(store_id=request.user.store_id)
+        qs = qs.order_by('sort_order', 'name_ar')
+        return ok({'categories': list(qs.values('id', 'name_ar', 'name_en'))})
 
 
 # ─── Action log ──────────────────────────────────────────────────────────────
