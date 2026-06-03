@@ -70,6 +70,7 @@ class VerifyOTPSerializer(serializers.Serializer):
 
 
 class SendOTPView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
     throttle_classes = [OTPSendThrottle]
 
@@ -99,6 +100,7 @@ class SendOTPView(APIView):
 
 
 class VerifyOTPView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
     throttle_classes = [OTPVerifyThrottle]
 
@@ -172,6 +174,7 @@ class FirebaseTokenLoginView(APIView):
     POST /auth/firebase-token/
     Body: { id_token, phone, full_name?, fcm_token? }
     """
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):

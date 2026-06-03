@@ -26,6 +26,7 @@ User = get_user_model()
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 
 class RegisterView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -38,6 +39,7 @@ class RegisterView(APIView):
 
 class StaffLoginView(APIView):
     """phone + password — for preparer / driver / admin / branch_manager / support."""
+    authentication_classes = []   # prevent stale JWT from causing user_not_found 401
     permission_classes = [permissions.AllowAny]
     throttle_classes = [StaffLoginThrottle]
 
@@ -94,6 +96,7 @@ class BiometricRegisterView(APIView):
 
 
 class BiometricLoginView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
