@@ -10,4 +10,5 @@ urlpatterns = [
     path('<int:pk>/read/', views.MarkNotificationReadView.as_view(), name='mark-read'),
     path('read-all/', views.MarkAllNotificationsReadView.as_view(), name='mark-all-read'),
     path('admin/send/', views.AdminSendNotificationView.as_view(), name='admin-send-notification'),
+    path('test/', views.TestPushNotificationView.as_view(), name='test-push'),
 ]

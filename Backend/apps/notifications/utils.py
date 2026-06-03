@@ -15,6 +15,34 @@ from .models import InAppNotification
 
 logger = logging.getLogger(__name__)
 
+# ── Android channel helpers ────────────────────────────────────────────────────
+# The customer app registers: 'market_fresh_orders', 'market_fresh_promotions'
+# The agent app (preparer/driver) registers: 'agent_new_order', 'agent_adjustment',
+#   'agent_general'
+# Android 8+ silently drops notifications whose channel_id is not registered on
+# the device, so we must send the EXACT channel key the app created — a mismatch
+# here makes background/killed-app pushes vanish on Android 8+.
+
+_AGENT_ROLES = frozenset(('preparer', 'driver'))
+
+
+def _android_channel(user, notif_type: str) -> str:
+    """Return the correct Android notification channel for this user + type."""
+    role = getattr(user, 'role', '') or ''
+    if role in _AGENT_ROLES:
+        if notif_type == 'new_order':
+            return 'agent_new_order'
+        if notif_type in ('order_status', 'adjustment_response',
+                          'price_change', 'substitute',
+                          'item_added', 'quantity_change'):
+            return 'agent_adjustment'
+        return 'agent_general'
+    # customer / admin / unknown → customer app channels. Promotions/stock use
+    # the lighter channel; everything else uses the high-importance orders one.
+    if notif_type in ('promotion', 'stock_available'):
+        return 'market_fresh_promotions'
+    return 'market_fresh_orders'
+
 
 def _persist_in_app(user, title_ar, title_en, body_ar, body_en, notif_type, data):
     try:
@@ -44,6 +72,30 @@ def _emit_ws_notification(user, payload):
         )
     except Exception:
         pass
+
+
+def _clear_token(user):
+    """Wipe a dead FCM token so we stop pushing to it; the app re-registers a
+    fresh token on its next launch/refresh."""
+    try:
+        user.fcm_token = ''
+        user.save(update_fields=['fcm_token'])
+    except Exception:
+        pass
+
+
+def _is_dead_token_error(exc) -> bool:
+    """True if the FCM error means the token is permanently invalid."""
+    try:
+        from firebase_admin import messaging
+        if isinstance(exc, messaging.UnregisteredError):
+            return True
+    except Exception:
+        pass
+    msg = str(exc).lower()
+    return ('registration-token-not-registered' in msg
+            or 'requested entity was not found' in msg
+            or 'invalid registration' in msg)
 
 
 def send_push_notification(user, title_ar, title_en, body_ar, body_en, data=None):
@@ -78,6 +130,7 @@ def send_push_notification(user, title_ar, title_en, body_ar, body_en, data=None
             'type': notif_type,
             **data,
         }.items()}
+        channel = _android_channel(user, notif_type)
         message = messaging.Message(
             notification=messaging.Notification(title=title_ar, body=body_ar),
             data=str_data,
@@ -85,7 +138,7 @@ def send_push_notification(user, title_ar, title_en, body_ar, body_en, data=None
                 priority='high',
                 notification=messaging.AndroidNotification(
                     sound='notification_sound',
-                    channel_id='shopping_market_orders',
+                    channel_id=channel,
                 ),
             ),
             apns=messaging.APNSConfig(
@@ -101,6 +154,8 @@ def send_push_notification(user, title_ar, title_en, body_ar, body_en, data=None
             logger.debug('push sent to %s', user.phone)
         return True
     except Exception as e:
+        if _is_dead_token_error(e):
+            _clear_token(user)
         logger.warning('push error for user %s: %s', user.id, e)
         return False
 
@@ -137,12 +192,35 @@ def send_bulk_push(users_qs, title_ar, title_en, body_ar, body_en, data=None):
             'type': notif_type,
             **data,
         }.items()}
+        # Determine channel from the first recipient's role (bulk sends are
+        # role-homogeneous in practice: all customers or all agents).
+        first_user = users[0] if users else None
+        channel = _android_channel(first_user, notif_type) if first_user else 'shopping_market_orders'
         message = messaging.MulticastMessage(
             notification=messaging.Notification(title=title_ar, body=body_ar),
             data=str_data,
+            android=messaging.AndroidConfig(
+                priority='high',
+                notification=messaging.AndroidNotification(
+                    sound='notification_sound',
+                    channel_id=channel,
+                ),
+            ),
+            apns=messaging.APNSConfig(
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(sound='notification_sound.wav'),
+                ),
+            ),
             tokens=tokens,
         )
         response = messaging.send_each_for_multicast(message)
+        # Clear any dead tokens so future sends skip them (responses align 1:1
+        # with `users`, which were all guaranteed to have a token above).
+        if response.failure_count:
+            for idx, resp in enumerate(response.responses):
+                if not resp.success and _is_dead_token_error(getattr(resp, 'exception', None)):
+                    if idx < len(users):
+                        _clear_token(users[idx])
         logger.info('bulk push: %d ok, %d failed', response.success_count, response.failure_count)
         return response.success_count
     except Exception as e:

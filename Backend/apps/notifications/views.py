@@ -156,3 +156,30 @@ class AdminSendNotificationView(APIView):
         sent = send_bulk_push(qs, title_ar, title_en, body_ar, body_en,
                               data={'type': notif_type, 'broadcast': True})
         return ok({'sent_push': sent, 'persisted_in_app': len(users)})
+
+
+class TestPushNotificationView(APIView):
+    """POST /notifications/test/ — send a test push to the authenticated user's
+    own device so they can verify notifications work on THIS device.
+
+    Returns whether a token is registered and whether FCM accepted the send, so
+    the app can tell the user exactly what's wrong (no token vs. delivery failure)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from apps.notifications.utils import send_push_notification
+        user = request.user
+        has_token = bool(getattr(user, 'fcm_token', None))
+        sent = send_push_notification(
+            user,
+            title_ar='✅ اختبار الإشعارات',
+            title_en='Notification test',
+            body_ar='الإشعارات تعمل على هذا الجهاز.',
+            body_en='Notifications are working on this device.',
+            data={'type': 'test'},
+        )
+        return ok({
+            'has_token': has_token,
+            'fcm_sent': sent,
+            'role': getattr(user, 'role', ''),
+        })
