@@ -1,7 +1,7 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from django.conf import settings
-from django.conf.urls.static import static
+from django.views.static import serve as _media_serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 urlpatterns = [
@@ -28,9 +28,21 @@ urlpatterns = [
     path('api/v1/ratings/', include(('apps.orders.rating_urls', 'ratings'), namespace='ratings')),
     path('api/v1/reports/', include(('apps.analytics.reports.urls', 'reports'), namespace='reports')),
     path('api/v1/analytics/', include('apps.analytics.urls')),
+    path('api/v1/payments/', include(('apps.payments.urls', 'payments'), namespace='payments')),
+    path('api/v1/ai/', include(('apps.ai.urls', 'ai'), namespace='ai')),
     path('api/v1/', include(('apps.core.urls', 'core'), namespace='core')),
 
     # ───────── Spec-shape aliases (no v1 prefix, matches the prompt verbatim) ─────────
     path('api/auth/', include('apps.users.urls')),
     path('api/stores/', include(('apps.stores.urls', 'stores2'), namespace='stores_alias')),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+]
+
+# Serve uploaded media in ALL environments. The mobile apps hit gunicorn (:8000)
+# directly, bypassing nginx, so Django itself must serve /media/ — the usual
+# static() helper only does this when DEBUG=True (here DEBUG=False in prod),
+# which left uploaded product images returning 404 (blank image after save).
+if not getattr(settings, 'USE_S3', False):
+    urlpatterns += [
+        re_path(r'^media/(?P<path>.*)$', _media_serve,
+                {'document_root': settings.MEDIA_ROOT}),
+    ]
