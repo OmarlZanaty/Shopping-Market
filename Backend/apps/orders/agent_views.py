@@ -95,6 +95,11 @@ class AgentOrderListView(generics.ListAPIView):
                 qs = qs.filter(status=statuses[0])
             else:
                 qs = qs.filter(status__in=statuses)
+        # Search by order number (full dataset, not just the current page).
+        search = (self.request.query_params.get('search')
+                  or self.request.query_params.get('q') or '').strip()
+        if search:
+            qs = qs.filter(order_number__icontains=search)
         return qs.distinct().order_by('-created_at')
 
 
