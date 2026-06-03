@@ -309,6 +309,8 @@ class AgentItemAdjustQtyView(APIView):
             item.status = OrderItem.ItemStatus.PENDING
             update_fields.append('status')
         item.save(update_fields=update_fields)
+        # Picked qty feeds line_total → keep the order total in sync.
+        item.order.calculate_totals()
 
         adj = OrderAdjustment.objects.create(
             order=item.order, order_item=item, preparer=request.user if request.user.role == 'preparer' else None,
@@ -454,6 +456,8 @@ class AgentItemSubstituteView(APIView):
         item.substitute_product = substitute
         item.status = OrderItem.ItemStatus.UNAVAILABLE
         item.save(update_fields=['substitute_product', 'status'])
+        # Original item is now unavailable → drop it from the total.
+        item.order.calculate_totals()
 
         adj = OrderAdjustment.objects.create(
             order=item.order, order_item=item,
