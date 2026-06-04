@@ -413,9 +413,10 @@ class AdminProductNotifyWaitlistView(APIView):
 class AdminCategoryListView(generics.ListCreateAPIView):
     serializer_class = CategorySerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminWriteOrSupportRead]
+    pagination_class = None  # short list — return ALL categories (was capped at 20)
 
     def get_queryset(self):
-        return scope_to_user(Category.objects.all(), self.request.user)
+        return scope_to_user(Category.objects.all(), self.request.user).order_by('sort_order', 'id')
 
     def perform_create(self, serializer):
         enforce_store_id_on_create(serializer, self.request.user)
