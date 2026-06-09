@@ -153,7 +153,17 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         alternative_ids = validated_data.pop('alternative_ids', [])
         related_ids = validated_data.pop('related_ids', [])
         branch_stock = validated_data.pop('branch_stock_items', [])
+        # M2M fields can't be passed to objects.create(); strip and apply after.
+        m2m_categories = validated_data.pop('categories', None)
+        m2m_alternatives = validated_data.pop('alternative_products', None)
+        m2m_related = validated_data.pop('related_products', None)
         product = Product.objects.create(**validated_data)
+        if m2m_categories is not None:
+            product.categories.set(m2m_categories)
+        if m2m_alternatives is not None:
+            product.alternative_products.set(m2m_alternatives)
+        if m2m_related is not None:
+            product.related_products.set(m2m_related)
         self._set_m2m(product, category_ids, alternative_ids, related_ids, branch_stock)
         return product
 
@@ -162,9 +172,19 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         alternative_ids = validated_data.pop('alternative_ids', None)
         related_ids = validated_data.pop('related_ids', None)
         branch_stock = validated_data.pop('branch_stock_items', None)
+        # M2M fields can't be set via setattr; pull them out and apply via .set().
+        m2m_categories = validated_data.pop('categories', None)
+        m2m_alternatives = validated_data.pop('alternative_products', None)
+        m2m_related = validated_data.pop('related_products', None)
         for attr, val in validated_data.items():
             setattr(instance, attr, val)
         instance.save()
+        if m2m_categories is not None:
+            instance.categories.set(m2m_categories)
+        if m2m_alternatives is not None:
+            instance.alternative_products.set(m2m_alternatives)
+        if m2m_related is not None:
+            instance.related_products.set(m2m_related)
         self._set_m2m(instance, category_ids, alternative_ids, related_ids, branch_stock)
         return instance
 
