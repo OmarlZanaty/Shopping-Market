@@ -133,6 +133,7 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         child=serializers.DictField(), write_only=True, required=False,
         help_text='[{branch_id, stock_quantity}, ...]',
     )
+    main_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -147,6 +148,18 @@ class ProductCreateSerializer(serializers.ModelSerializer):
 
     def validate_main_image(self, value):
         return validate_image_upload(value)
+
+    def get_main_image_url(self, obj):
+        if obj.image_url_s3:
+            return obj.image_url_s3
+        if obj.main_image:
+            request = self.context.get('request')
+            if request:
+                try:
+                    return request.build_absolute_uri(obj.main_image.url)
+                except Exception:
+                    pass
+        return ''
 
     def create(self, validated_data):
         category_ids = validated_data.pop('category_ids', [])
