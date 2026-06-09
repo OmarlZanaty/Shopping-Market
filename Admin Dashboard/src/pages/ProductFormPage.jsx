@@ -66,7 +66,19 @@ export default function ProductFormPage() {
       return isEdit ? productApi.update(id, fd) : productApi.create(fd);
     },
     onSuccess: () => { qc.invalidateQueries(['admin-products']); toast.success(t(isEdit ? 'تم التحديث' : 'تم إضافة المنتج', isEdit ? 'Updated' : 'Added')); navigate('/products'); },
-    onError: (e) => toast.error(e.response?.data?.name_ar?.[0] || t('حدث خطأ', 'Error')),
+    onError: (e) => {
+      const d = e.response?.data;
+      let msg = '';
+      if (Array.isArray(d?.errors) && d.errors.length) {
+        msg = d.errors.map(x => x.field ? `${x.field}: ${x.message}` : x.message).join('\n');
+      } else if (d?.message && d.message !== 'Request error') {
+        msg = d.message;
+      } else if (d && typeof d === 'object') {
+        const first = Object.values(d).flat().find(v => typeof v === 'string');
+        if (first) msg = first;
+      }
+      toast.error(msg || t('حدث خطأ', 'Error'));
+    },
   });
 
   const handleImageChange = (e) => {
