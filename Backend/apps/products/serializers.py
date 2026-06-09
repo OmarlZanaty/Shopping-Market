@@ -138,6 +138,8 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         model = Product
         fields = '__all__'
         extra_kwargs = {
+            # store is injected server-side (enforce_store_id_on_create)
+            'store': {'required': False},
             'categories': {'required': False},
             'alternative_products': {'required': False},
             'related_products': {'required': False},
