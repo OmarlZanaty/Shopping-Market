@@ -189,6 +189,11 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         m2m_categories = validated_data.pop('categories', None)
         m2m_alternatives = validated_data.pop('alternative_products', None)
         m2m_related = validated_data.pop('related_products', None)
+        # A freshly uploaded file must win over any cached external URL,
+        # otherwise the stale image_url_s3 keeps being served.
+        if validated_data.get('main_image'):
+            instance.image_url_s3 = ''
+            instance.thumbnail_url = ''
         for attr, val in validated_data.items():
             setattr(instance, attr, val)
         instance.save()
