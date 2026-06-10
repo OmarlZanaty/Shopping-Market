@@ -9,7 +9,13 @@ class ApiService {
   factory ApiService() => _instance;
   ApiService._internal();
 
-  final _storage = const FlutterSecureStorage();
+  /// Called whenever a 401 cannot be recovered (refresh expired / invalid).
+  /// Set this from AuthProvider.init() to trigger a UI-level logout.
+  static void Function()? onUnauthorized;
+
+  final _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
   late final Dio _dio;
 
   void init() {
@@ -22,32 +28,48 @@ class ApiService {
 
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
-        final token = await _storage.read(key: StorageKeys.accessToken);
-        if (token != null) {
-          options.headers['Authorization'] = 'Bearer $token';
+        try {
+          // Don't attach a stale token to public auth endpoints — a deleted-user
+          // token causes the server to return 401 user_not_found before the view runs.
+          const _noAuth = ['/auth/login/', '/auth/register/', '/auth/refresh/',
+                           '/auth/firebase-token/', '/auth/verify-otp/', '/auth/send-otp/',
+                           '/auth/social/', '/auth/biometric/login/'];
+          final isPublic = _noAuth.any((p) => options.path.contains(p));
+          final token = await _storage.read(key: StorageKeys.accessToken);
+          if (token != null && !isPublic) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+        } catch (_) {
+          // Corrupt storage — ignore and proceed unauthenticated.
+          await _storage.deleteAll();
         }
         return handler.next(options);
       },
       onError: (e, handler) async {
-        // Don't try to refresh token on auth endpoints
+        // Don't try to refresh on auth endpoints (login, register, social…)
         final path = e.requestOptions.path;
         final isAuthEndpoint = path.contains('/auth/login/') ||
             path.contains('/auth/register/') ||
             path.contains('/auth/social-login/') ||
-            path.contains('/auth/biometric/');
+            path.contains('/auth/biometric/') ||
+            path.contains('/auth/refresh/') ||
+            path.contains('/auth/token/refresh/');
 
         if (e.response?.statusCode == 401 && !isAuthEndpoint) {
           final refreshed = await _refreshToken();
           if (refreshed) {
+            // Retry with the new access token
             final token = await _storage.read(key: StorageKeys.accessToken);
             e.requestOptions.headers['Authorization'] = 'Bearer $token';
-            final retry = await _dio.request(
-              e.requestOptions.path,
-              options: Options(method: e.requestOptions.method, headers: e.requestOptions.headers),
-              data: e.requestOptions.data,
-              queryParameters: e.requestOptions.queryParameters,
-            );
-            return handler.resolve(retry);
+            try {
+              final retry = await _dio.fetch(e.requestOptions);
+              return handler.resolve(retry);
+            } catch (retryErr) {
+              return handler.next(e);
+            }
+          } else {
+            // Refresh failed — tokens are gone; notify the app to log out.
+            onUnauthorized?.call();
           }
         }
         return handler.next(e);
@@ -61,28 +83,76 @@ class ApiService {
     ));
   }
 
-  Future<bool> _refreshToken() async {
+  /// In-flight refresh, shared so concurrent 401s perform ONE refresh.
+  /// With ROTATE_REFRESH_TOKENS + BLACKLIST_AFTER_ROTATION on the server,
+  /// parallel refreshes race: the first rotation blacklists the old token and
+  /// the losers get 401 → deleteAll() → user is logged out on every cold start.
+  Future<bool>? _refreshInFlight;
+
+  Future<bool> _refreshToken() {
+    final inFlight = _refreshInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _doRefreshToken().whenComplete(() => _refreshInFlight = null);
+    _refreshInFlight = future;
+    return future;
+  }
+
+  Future<bool> _doRefreshToken() async {
     try {
       final refresh = await _storage.read(key: StorageKeys.refreshToken);
       if (refresh == null) return false;
-      // Try /auth/refresh/ (new) then /auth/token/refresh/ (legacy)
-      Response res;
-      try {
-        res = await Dio().post('${AppConfig.baseUrl}/auth/refresh/', data: {'refresh': refresh});
-      } catch (_) {
-        res = await Dio().post('${AppConfig.baseUrl}/auth/token/refresh/', data: {'refresh': refresh});
+
+      // Use a plain Dio (no auth interceptor) to avoid infinite retry loops.
+      final plain = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 15),
+      ));
+
+      Response? res;
+      for (final url in [
+        '${AppConfig.baseUrl}/auth/refresh/',
+        '${AppConfig.baseUrl}/auth/token/refresh/',
+      ]) {
+        try {
+          res = await plain.post(url, data: {'refresh': refresh});
+          break; // success — stop trying
+        } on DioException catch (e) {
+          final status = e.response?.statusCode;
+          if (status == 401 || status == 403) {
+            // Refresh token is genuinely expired / blacklisted — must log out.
+            await _storage.deleteAll();
+            return false;
+          }
+          if (e.response != null) {
+            // Other 4xx/5xx (e.g. 500 server glitch) — don't wipe tokens,
+            // just report the refresh as failed so the caller can fall back.
+            return false;
+          }
+          // Network-level error (timeout, no connection) → try next URL.
+        }
       }
-      final access = res.data['access'] ?? res.data['data']?['access'];
-      final newRefresh = res.data['refresh'] ?? res.data['data']?['refresh'];
-      if (access != null) {
-        await _storage.write(key: StorageKeys.accessToken, value: access);
+
+      if (res == null) {
+        // Both URLs failed at network level — keep tokens, report failure.
+        return false;
       }
+
+      final body = res.data is Map ? res.data as Map : {};
+      final access = body['access'] ?? body['data']?['access'];
+      final newRefresh = body['refresh'] ?? body['data']?['refresh'];
+
+      if (access == null) {
+        // Unexpected response shape — don't wipe tokens, just fail silently.
+        return false;
+      }
+
+      await _storage.write(key: StorageKeys.accessToken, value: access as String);
       if (newRefresh != null) {
-        await _storage.write(key: StorageKeys.refreshToken, value: newRefresh);
+        await _storage.write(key: StorageKeys.refreshToken, value: newRefresh as String);
       }
-      return access != null;
+      return true;
     } catch (_) {
-      await _storage.deleteAll();
+      // Unexpected error — don't wipe tokens.
       return false;
     }
   }
@@ -112,6 +182,28 @@ class ApiService {
     final res = await _dio.post('/auth/verify-otp/', data: {
       'phone': phone,
       'code': code,
+      if (fullName != null && fullName.isNotEmpty) 'full_name': fullName,
+      if (fcmToken != null && fcmToken.isNotEmpty) 'fcm_token': fcmToken,
+    });
+    final data = _unwrap(res.data);
+    final m = Map<String, dynamic>.from(data is Map ? data : {});
+    if (m['access'] != null && m['refresh'] != null) {
+      await _saveTokens(m['access'], m['refresh']);
+    }
+    return m;
+  }
+
+  /// Exchange a Firebase Phone Auth ID token for our Django JWT.
+  /// Backend: POST /auth/firebase-token/
+  Future<Map<String, dynamic>> firebaseTokenLogin({
+    required String idToken,
+    required String phone,
+    String? fullName,
+    String? fcmToken,
+  }) async {
+    final res = await _dio.post('/auth/firebase-token/', data: {
+      'id_token': idToken,
+      'phone': phone,
       if (fullName != null && fullName.isNotEmpty) 'full_name': fullName,
       if (fcmToken != null && fcmToken.isNotEmpty) 'fcm_token': fcmToken,
     });
@@ -240,6 +332,8 @@ class ApiService {
   }
 
   /// Approve / reject an adjustment with the NEW path.
+  /// Returns full response including `payment_required`, `amount_owed`,
+  /// `wallet_refund` fields when applicable.
   Future<Map<String, dynamic>> approveAdjustmentV2(
     String orderId,
     int adjustmentId,
@@ -248,6 +342,20 @@ class ApiService {
     final res = await _dio.patch('/orders/$orderId/approve-adjustment/', data: {
       'adjustment_id': adjustmentId,
       'approved': approved,
+    });
+    final data = _unwrap(res.data);
+    return Map<String, dynamic>.from(data is Map ? data : {});
+  }
+
+  /// Initiate a Paymob card payment for a price-increase adjustment.
+  /// Returns `{ iframe_url, transaction_id, amount_egp }`.
+  Future<Map<String, dynamic>> initiateAdjustmentPayment({
+    required String orderId,
+    required int adjustmentId,
+  }) async {
+    final res = await _dio.post('/payments/adjustment-topup/', data: {
+      'order_id': orderId,
+      'adjustment_id': adjustmentId,
     });
     final data = _unwrap(res.data);
     return Map<String, dynamic>.from(data is Map ? data : {});
@@ -299,12 +407,36 @@ class ApiService {
     await _dio.post('/auth/biometric/register/', data: {'biometric_token': biometricToken});
   }
 
+  /// Wipes local tokens immediately, then best-effort notifies the server.
+  ///
+  /// We deliberately do `deleteAll()` BEFORE the network call so that:
+  ///   • the auth interceptor can't enter a 401-refresh-onUnauthorized cycle
+  ///     while logout is still in flight (was causing blank-screen logout),
+  ///   • a slow / failing network never blocks the UI from leaving the
+  ///     authenticated screens.
+  /// The server-side call is fire-and-forget using a plain Dio (no interceptors)
+  /// so a corrupt access token can't bounce through refresh logic.
   Future<void> logout() async {
+    String? refresh;
     try {
-      final refresh = await _storage.read(key: StorageKeys.refreshToken);
-      await _dio.post('/auth/logout/', data: {'refresh': refresh});
+      refresh = await _storage.read(key: StorageKeys.refreshToken);
     } catch (_) {}
-    await _storage.deleteAll();
+    // 1) Local wipe — synchronous from the caller's perspective.
+    try {
+      await _storage.deleteAll();
+    } catch (_) {}
+    // 2) Best-effort server notify. Plain Dio = no auth interceptor, no refresh
+    //    loop, no validateStatus throws.
+    if (refresh == null || refresh.isEmpty) return;
+    try {
+      final plain = Dio(BaseOptions(
+        baseUrl: AppConfig.baseUrl,
+        connectTimeout: const Duration(seconds: 5),
+        receiveTimeout: const Duration(seconds: 5),
+        validateStatus: (_) => true, // never throw on status code
+      ));
+      await plain.post('/auth/logout/', data: {'refresh': refresh});
+    } catch (_) {}
   }
 
   Future<void> updateFcmToken(String fcmToken) async {
@@ -323,6 +455,26 @@ class ApiService {
       res = await _dio.get('/auth/me/');
     } catch (_) {
       res = await _dio.get('/auth/profile/');
+    }
+    final data = _unwrap(res.data);
+    return UserModel.fromJson(Map<String, dynamic>.from(data is Map ? data : res.data));
+  }
+
+  Future<UserModel> updateProfile({
+    required String fullName,
+    required String phone,
+  }) async {
+    Response res;
+    try {
+      res = await _dio.patch('/auth/me/', data: {
+        'full_name': fullName,
+        'phone': phone,
+      });
+    } catch (_) {
+      res = await _dio.patch('/auth/profile/', data: {
+        'full_name': fullName,
+        'phone': phone,
+      });
     }
     final data = _unwrap(res.data);
     return UserModel.fromJson(Map<String, dynamic>.from(data is Map ? data : res.data));
@@ -415,16 +567,85 @@ class ApiService {
     return list.map((b) => BannerModel.fromJson(b)).toList().cast<BannerModel>();
   }
 
-  Future<void> toggleWaitlist(String productId) async {
-    await _dio.post('/products/$productId/waitlist/');
+  /// Join the waitlist for an out-of-stock product.
+  Future<void> addToWaitlist(String productId) async {
+    await _dio.post('/products/waitlist/', data: {'product_id': productId});
+  }
+
+  /// Leave the waitlist for a product.
+  Future<void> removeFromWaitlist(String productId) async {
+    await _dio.delete('/products/waitlist/$productId/');
   }
 
   // ─── Orders ───────────────────────────────────────────────────────────────
 
   Future<OrderModel> createOrder(Map<String, dynamic> data) async {
-    final res = await _dio.post('/orders/create/', data: data);
-    final body = _unwrap(res.data);
-    return OrderModel.fromJson(Map<String, dynamic>.from(body is Map ? body : res.data));
+    try {
+      final res = await _dio.post('/orders/create/', data: data);
+      final body = _unwrap(res.data);
+      return OrderModel.fromJson(Map<String, dynamic>.from(body is Map ? body : res.data));
+    } on DioException catch (e) {
+      // Translate the backend's English business-rule errors to Arabic so the
+      // UI never has to show "DioException [bad response]: …" to the user.
+      throw Exception(_translateOrderError(e));
+    }
+  }
+
+  /// Maps known English error messages from the backend's order-create
+  /// service to friendly Arabic. Falls back to the original message if the
+  /// backend already replied in Arabic, or a generic Arabic message otherwise.
+  String _translateOrderError(DioException e) {
+    String raw = '';
+    final r = e.response?.data;
+    if (r is Map) {
+      raw = (r['message'] ?? r['detail'] ?? '').toString();
+    }
+    raw = raw.trim();
+
+    // Already Arabic? Pass through verbatim.
+    if (RegExp(r'[؀-ۿ]').hasMatch(raw)) return raw;
+
+    final low = raw.toLowerCase();
+    if (low.contains('insufficient stock')) {
+      final m = RegExp(r'insufficient stock for\s+(.+)', caseSensitive: false)
+          .firstMatch(raw);
+      final name = (m?.group(1) ?? '').trim();
+      return name.isEmpty
+          ? 'الكمية المطلوبة غير متوفرة في المخزون'
+          : 'المنتج "$name" غير متوفر بالكمية المطلوبة في المخزون';
+    }
+    if (low.contains('address not found')) {
+      return 'العنوان غير موجود أو لا يخصك';
+    }
+    if (low.contains('same store') || low.contains('cross-store')) {
+      return 'لا يمكن إضافة منتجات من متاجر مختلفة في نفس الطلب';
+    }
+    if (low.contains('insufficient wallet')) {
+      return 'رصيد المحفظة غير كافٍ لإتمام الطلب';
+    }
+    if (low.contains('not enough loyalty points')) {
+      return 'نقاط الولاء غير كافية';
+    }
+    if (low.contains('at least one item')) {
+      return 'يجب إضافة منتج واحد على الأقل للطلب';
+    }
+    if (low.contains('not available')) {
+      return 'أحد المنتجات غير متاح حالياً';
+    }
+    if (low.contains('not found')) {
+      return 'أحد المنتجات غير موجود في قاعدة البيانات';
+    }
+    if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.receiveTimeout ||
+        e.type == DioExceptionType.sendTimeout) {
+      return 'انقطع الاتصال بالخادم، تحقق من الإنترنت وحاول مرة أخرى';
+    }
+    if (e.type == DioExceptionType.connectionError) {
+      return 'لا يمكن الاتصال بالخادم، تحقق من الإنترنت';
+    }
+    return raw.isNotEmpty
+        ? 'تعذر إتمام الطلب: $raw'
+        : 'تعذر إتمام الطلب الآن، حاول مرة أخرى';
   }
 
   Future<List<OrderModel>> getMyOrders() async {
@@ -439,6 +660,18 @@ class ApiService {
     final res = await _dio.get('/orders/$orderId/');
     final body = _unwrap(res.data);
     return OrderModel.fromJson(Map<String, dynamic>.from(body is Map ? body : res.data));
+  }
+
+  /// Agent-side order detail — uses /agent/orders/{id}/ which is scoped by
+  /// store/assignment, not by customer. Falls back to customer endpoint.
+  Future<OrderModel> getAgentOrder(String orderId) async {
+    try {
+      final res = await _dio.get('/agent/orders/$orderId/');
+      final body = _unwrap(res.data);
+      return OrderModel.fromJson(Map<String, dynamic>.from(body is Map ? body : res.data));
+    } catch (_) {
+      return getOrder(orderId);
+    }
   }
 
   Future<Map<String, dynamic>> confirmReceipt(String orderId) async {
@@ -474,9 +707,16 @@ class ApiService {
 
   Future<OrderModel> acceptOrder(String orderId) async {
     final res = await _dio.post('/orders/$orderId/accept/');
-    return OrderModel.fromJson(res.data);
+    final body = _unwrap(res.data);
+    return OrderModel.fromJson(Map<String, dynamic>.from(body is Map ? body : res.data));
   }
 
+  /// Transition: accepted → preparing
+  Future<void> startPreparing(String orderId) async {
+    await _dio.post('/orders/$orderId/start-preparing/');
+  }
+
+  /// Transition: preparing → out_for_delivery (order ready for pickup/delivery)
   Future<void> startDelivery(String orderId) async {
     await _dio.post('/orders/$orderId/start-delivery/');
   }
@@ -542,5 +782,41 @@ class ApiService {
   Future<List<Map<String, dynamic>>> getMyNotifications() async {
     final res = await _dio.get('/notifications/my/');
     return List<Map<String, dynamic>>.from(res.data['results'] ?? res.data);
+  }
+
+  // ─── AI / Smart Shopping ──────────────────────────────────────────────────
+
+  /// Personalised product recommendations for the logged-in user.
+  Future<List<ProductModel>> getRecommendations({
+    int limit = 10,
+    String? storeId,
+  }) async {
+    final res = await _dio.get('/ai/recommendations/', queryParameters: {
+      'limit': limit,
+      if (storeId != null) 'store_id': storeId,
+    });
+    final data = _unwrap(res.data);
+    final list = (data is Map ? data['results'] : data) as List? ?? [];
+    return list.map<ProductModel>((p) => ProductModel.fromJson(p)).toList();
+  }
+
+  /// "You usually order these" nudge list for the current session.
+  Future<List<ProductModel>> getSmartCart({String? storeId}) async {
+    final res = await _dio.get('/ai/smart-cart/', queryParameters: {
+      if (storeId != null) 'store_id': storeId,
+    });
+    final data = _unwrap(res.data);
+    final list = (data is Map ? data['results'] : data) as List? ?? [];
+    return list.map<ProductModel>((p) => ProductModel.fromJson(p)).toList();
+  }
+
+  /// Visual search — send base64-encoded image, get matching products.
+  Future<Map<String, dynamic>> visualSearch(String imageBase64, {String? storeId}) async {
+    final res = await _dio.post('/ai/visual-search/', data: {
+      'image_base64': imageBase64,
+      if (storeId != null) 'store_id': storeId,
+    });
+    final data = _unwrap(res.data);
+    return Map<String, dynamic>.from(data is Map ? data : {});
   }
 }
