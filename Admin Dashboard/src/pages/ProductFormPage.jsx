@@ -96,7 +96,11 @@ export default function ProductFormPage() {
     queryFn: () => productApi.listImages(id).then(r => r.data),
     enabled: isEdit,
   });
-  const gallery = Array.isArray(galleryData) ? galleryData : [];
+  // The list endpoint returns the ok() envelope { success, data: [...] }; also
+  // tolerate a raw array in case the shape changes.
+  const gallery = Array.isArray(galleryData)
+    ? galleryData
+    : (Array.isArray(galleryData?.data) ? galleryData.data : []);
 
   const addImagesMutation = useMutation({
     mutationFn: (files) => {
