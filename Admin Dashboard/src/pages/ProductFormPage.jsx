@@ -62,6 +62,9 @@ export default function ProductFormPage() {
         if (Array.isArray(v)) v.forEach(item => fd.append(k, item));
         else if (v !== null && v !== undefined && v !== '') fd.append(k, v);
       });
+      // "متاح للبيع" governs customer visibility: keep is_active in sync so an
+      // available product is never left hidden (is_active=false) in the app.
+      fd.append('is_active', data.is_available ? 'true' : 'false');
       if (imageFile) fd.append('main_image', imageFile);
       return isEdit ? productApi.update(id, fd) : productApi.create(fd);
     },
