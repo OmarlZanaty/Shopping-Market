@@ -133,13 +133,32 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _loadData() async {
     setState(() => _loading = true);
+
+    // Retry helper — retries once after a short delay on any transient error
+    // (e.g. "connection closed" from uvicorn when many requests fire at once),
+    // then returns [fallback] so a single failed endpoint never blocks the rest.
+    Future<T> _safe<T>(Future<T> Function() call, T fallback) async {
+      try {
+        return await call();
+      } catch (_) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        try {
+          return await call();
+        } catch (_) {
+          return fallback;
+        }
+      }
+    }
+
     try {
       final results = await Future.wait([
-        _api.getBanners(position: 'home_main'),
-        _api.getCategories(),
-        _api.getProducts(page: 1),
-        _api.getProducts(featured: true),
-        _api.getAppSettings(),
+        _safe(() => _api.getBanners(position: 'home_main'), <BannerModel>[]),
+        _safe(() => _api.getCategories(),                  <CategoryModel>[]),
+        _safe(() => _api.getProducts(page: 1),
+              <String, dynamic>{'results': [], 'next': null}),
+        _safe(() => _api.getProducts(featured: true),
+              <String, dynamic>{'results': [], 'next': null}),
+        _safe(() => _api.getAppSettings(),                 <String, dynamic>{}),
       ]);
       if (!mounted) return;
       final productsData  = results[2] as Map<String, dynamic>;
@@ -160,11 +179,20 @@ class _HomeScreenState extends State<HomeScreen>
       // Load AI sections in background — non-blocking, failures silently ignored
       _loadAiSections();
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+        // Always start the fade animation so the screen is never invisibly blank
+        // even if all requests fail (e.g. no network on first open).
+        _fadeCtrl.forward(from: 0);
+      }
     }
   }
 
   Future<void> _loadAiSections() async {
+    // AI features are server-gated via `ai_recommendations_enabled`. When it's
+    // off (or the AI service isn't deployed) skip the calls entirely so we don't
+    // hit the /ai/ endpoints and log 404s. Auto-enables once the flag is "1".
+    if (_appSettings['ai_recommendations_enabled']?.toString() != '1') return;
     try {
       final recs = await _api.getRecommendations(limit: 10);
       if (mounted && recs.isNotEmpty) setState(() => _recommendations = recs);
@@ -1343,12 +1371,15 @@ class _SearchSheetState extends State<_SearchSheet> {
                         builder: (_) => const BarcodeScannerScreen()));
                 if (barcode == null || !widget.parentContext.mounted) return;
                 try {
-                  final found = await widget.api.searchSuggestions(barcode);
+                  // Use the dedicated barcode endpoint — barcode is the raw
+                  // scan string, NOT a UUID, so searchSuggestions is wrong here.
+                  final product =
+                      await widget.api.getProductByBarcode(barcode);
                   if (!widget.parentContext.mounted) return;
-                  if (found.isNotEmpty) {
-                    widget.parentContext.read<CartProvider>().addItem(found.first);
+                  if (product != null) {
+                    widget.parentContext.read<CartProvider>().addItem(product);
                     ScaffoldMessenger.of(widget.parentContext).showSnackBar(SnackBar(
-                      content: Text('تمت الإضافة: ${found.first.nameAr}',
+                      content: Text('تمت الإضافة: ${product.nameAr}',
                           style: const TextStyle(fontFamily: 'Cairo')),
                       backgroundColor: AppColors.mint,
                       behavior: SnackBarBehavior.floating,
@@ -1395,6 +1426,11 @@ class _SearchSheetState extends State<_SearchSheet> {
                   itemBuilder: (_, i) => _SearchResultCard(
                     product: _results[i],
                     onClose: () => Navigator.pop(context),
+                    onOpen: () {
+                      final p = _results[i];
+                      Navigator.pop(context); // close the search sheet
+                      widget.parentContext.push('/product/${p.id}');
+                    },
                   ),
                 ),
         ),
@@ -1432,7 +1468,12 @@ class _SearchSheetState extends State<_SearchSheet> {
 class _SearchResultCard extends StatelessWidget {
   final ProductModel product;
   final VoidCallback onClose;
-  const _SearchResultCard({required this.product, required this.onClose});
+  final VoidCallback onOpen;
+  const _SearchResultCard({
+    required this.product,
+    required this.onClose,
+    required this.onOpen,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1453,25 +1494,30 @@ class _SearchResultCard extends StatelessWidget {
             )],
           ),
           child: Row(children: [
-            // Image
-            ClipRRect(
-              borderRadius: const BorderRadius.horizontal(
-                  right: Radius.circular(18)),
-              child: SizedBox(
-                width: 88, height: 88,
-                child: p.mainImageUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                        imageUrl: p.mainImageUrl, fit: BoxFit.cover,
-                        placeholder: (_, __) => _imgFallback(),
-                        errorWidget: (_, __, ___) => _imgFallback())
-                    : _imgFallback(),
-              ),
-            ),
-            // Info
+            // Image + info — tapping opens the product detail screen.
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                child: Column(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onOpen,
+                child: Row(children: [
+                  ClipRRect(
+                    borderRadius: const BorderRadius.horizontal(
+                        right: Radius.circular(18)),
+                    child: SizedBox(
+                      width: 88, height: 88,
+                      child: p.mainImageUrl.isNotEmpty
+                          ? CachedNetworkImage(
+                              imageUrl: p.mainImageUrl, fit: BoxFit.cover,
+                              placeholder: (_, __) => _imgFallback(),
+                              errorWidget: (_, __, ___) => _imgFallback())
+                          : _imgFallback(),
+                    ),
+                  ),
+                  // Info
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -1504,6 +1550,9 @@ class _SearchResultCard extends StatelessWidget {
                     ]),
                   ],
                 ),
+              ),
+                  ),
+                ]),
               ),
             ),
             // Qty control
