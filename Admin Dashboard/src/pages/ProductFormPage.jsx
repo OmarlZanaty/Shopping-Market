@@ -102,7 +102,13 @@ export default function ProductFormPage() {
       return productApi.addImages(id, fd);
     },
     onSuccess: () => { qc.invalidateQueries(['product-images', id]); toast.success(t('تمت إضافة الصور', 'Images added')); },
-    onError: () => toast.error(t('تعذّر رفع الصور', 'Upload failed')),
+    onError: (e) => {
+      const d = e.response?.data;
+      const msg = Array.isArray(d?.errors) && d.errors.length
+        ? d.errors.map(x => x.message).join('\n')
+        : (d?.message && d.message !== 'Request error' ? d.message : '');
+      toast.error(msg || t('تعذّر رفع الصور', 'Upload failed'));
+    },
   });
   const deleteImageMutation = useMutation({
     mutationFn: (imageId) => productApi.deleteImage(id, imageId),

@@ -8,9 +8,26 @@ image; these are additional gallery photos shown in a carousel.
 """
 from django.db.models import Max
 
+from rest_framework import serializers
+
 from .models import ProductImage
 from .serializers import ProductImageSerializer
-from apps.core.validators import validate_image_upload, optimize_image_file
+from apps.core.validators import ALLOWED_IMAGE_MIME, optimize_image_file
+
+# Source cap before optimization. Generous because we downscale to ~800px
+# anyway (gallery photos are often multi-MB phone originals); this only guards
+# against absurd uploads that could exhaust memory.
+MAX_SOURCE_BYTES = 30 * 1024 * 1024
+
+
+def _validate_source(f):
+    if getattr(f, 'size', 0) and f.size > MAX_SOURCE_BYTES:
+        raise serializers.ValidationError(
+            f'Image must be ≤ {MAX_SOURCE_BYTES // (1024 * 1024)} MB')
+    ct = getattr(f, 'content_type', None)
+    if ct and ct not in ALLOWED_IMAGE_MIME:
+        raise serializers.ValidationError(
+            f'Image type must be one of {sorted(ALLOWED_IMAGE_MIME)}; got {ct}')
 
 
 def serialize_gallery(product, request):
@@ -37,7 +54,7 @@ def add_gallery_images(product, request):
     base_order = product.images.aggregate(m=Max('sort_order'))['m'] or 0
     created = []
     for i, f in enumerate(files, start=1):
-        validate_image_upload(f)
+        _validate_source(f)
         optimized = optimize_image_file(f)
         img = ProductImage.objects.create(
             product=product,
