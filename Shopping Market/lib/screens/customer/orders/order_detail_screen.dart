@@ -77,10 +77,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         behavior: SnackBarBehavior.floating,
       ));
     } catch (e) {
+      // The cancel was rejected (most likely the order already went out for
+      // delivery). Refresh so the status — and the Cancel button — update.
+      await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('تعذّر إلغاء الطلب — قد يكون خرج للتوصيل',
-            style: const TextStyle(fontFamily: 'Cairo')),
+            style: TextStyle(fontFamily: 'Cairo')),
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
       ));
