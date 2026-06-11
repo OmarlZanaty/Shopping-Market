@@ -177,8 +177,9 @@ class CustomerApproveAdjustmentView(APIView):
                     # Swap the line to the approved substitute (new product + price).
                     item.apply_substitute()
                 elif item:
-                    # Declined → original stays unavailable, so it isn't charged.
-                    item.status = OrderItem.ItemStatus.UNAVAILABLE
+                    # Declined → drop the item from the order entirely, so it is
+                    # neither charged nor shown on the order/receipt.
+                    item.status = OrderItem.ItemStatus.REMOVED
                     item.save(update_fields=['status'])
             elif adj.action_type in ('weight_diff_sent',):
                 if item:

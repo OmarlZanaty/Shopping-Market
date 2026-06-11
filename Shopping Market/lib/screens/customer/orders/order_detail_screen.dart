@@ -260,7 +260,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           // Explicit dark colors EVERYWHERE — the global theme is dark
           // (Brightness.dark), so any Text on a white card without a color
           // renders white-on-white and the name disappears.
-          _card(title: 'الأصناف (${o.items.length})', child: Column(children: o.items.map((item) {
+          _card(title: 'الأصناف (${_visibleItems(o).length})', child: Column(children: _visibleItems(o).map((item) {
             final hasImage = (item.productImageUrl ?? '').isNotEmpty;
             final unitLabel = item.status == 'substituted' ? 'بديل' : null;
             return Padding(
@@ -440,6 +440,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ])),
     );
   }
+
+  // Items shown on the order/receipt — rejected substitutes (status 'removed')
+  // and any explicitly removed lines are dropped entirely.
+  List<OrderItemModel> _visibleItems(OrderModel o) => o.items
+      .where((it) => it.status != 'removed' && it.status != 'unavailable')
+      .toList();
 
   Widget _card({String? title, required Widget child}) => Container(
     margin: const EdgeInsets.only(bottom: 10),
