@@ -1377,15 +1377,8 @@ class _SearchSheetState extends State<_SearchSheet> {
                       await widget.api.getProductByBarcode(barcode);
                   if (!widget.parentContext.mounted) return;
                   if (product != null) {
-                    widget.parentContext.read<CartProvider>().addItem(product);
-                    ScaffoldMessenger.of(widget.parentContext).showSnackBar(SnackBar(
-                      content: Text('تمت الإضافة: ${product.nameAr}',
-                          style: const TextStyle(fontFamily: 'Cairo')),
-                      backgroundColor: AppColors.mint,
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ));
+                    // Open the product screen instead of adding to cart.
+                    widget.parentContext.push('/product/${product.id}');
                   } else {
                     ScaffoldMessenger.of(widget.parentContext).showSnackBar(
                       const SnackBar(
