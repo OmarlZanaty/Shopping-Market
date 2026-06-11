@@ -87,6 +87,35 @@ export default function ProductFormPage() {
     const reader = new FileReader(); reader.onload = () => setImagePreview(reader.result); reader.readAsDataURL(file);
   };
 
+  // ── Image gallery (extra images, edit mode only) ──
+  const { data: galleryData } = useQuery({
+    queryKey: ['product-images', id],
+    queryFn: () => productApi.listImages(id).then(r => r.data),
+    enabled: isEdit,
+  });
+  const gallery = Array.isArray(galleryData) ? galleryData : [];
+
+  const addImagesMutation = useMutation({
+    mutationFn: (files) => {
+      const fd = new FormData();
+      Array.from(files).forEach(f => fd.append('images', f));
+      return productApi.addImages(id, fd);
+    },
+    onSuccess: () => { qc.invalidateQueries(['product-images', id]); toast.success(t('تمت إضافة الصور', 'Images added')); },
+    onError: () => toast.error(t('تعذّر رفع الصور', 'Upload failed')),
+  });
+  const deleteImageMutation = useMutation({
+    mutationFn: (imageId) => productApi.deleteImage(id, imageId),
+    onSuccess: () => { qc.invalidateQueries(['product-images', id]); },
+    onError: () => toast.error(t('تعذّر الحذف', 'Delete failed')),
+  });
+
+  const handleGalleryAdd = (e) => {
+    const files = e.target.files;
+    if (files && files.length) addImagesMutation.mutate(files);
+    e.target.value = '';
+  };
+
   const inp = 'w-full border-2 border-gray-100 focus:border-[#2E5E99] rounded-xl px-4 py-2.5 text-sm outline-none transition-colors';
   const lbl = 'text-xs font-semibold text-gray-600 uppercase tracking-wider block mb-1.5';
   const categories = Array.isArray(categoriesData) ? categoriesData : (categoriesData?.results || []);
@@ -126,6 +155,29 @@ export default function ProductFormPage() {
                 </div>
               </div>
             </div>
+
+            {/* Extra images gallery — available after the product exists */}
+            <div>
+              <label className={lbl}>{t('صور إضافية', 'Additional Images')}</label>
+              {!isEdit ? (
+                <p className="text-xs text-gray-400">{t('احفظ المنتج أولاً لإضافة صور إضافية', 'Save the product first to add more images')}</p>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
+                  {gallery.map(img => (
+                    <div key={img.id} className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200 group">
+                      <img src={img.image_url_full || img.image_url} alt="" className="w-full h-full object-cover" />
+                      <button type="button" onClick={() => deleteImageMutation.mutate(img.id)}
+                        className="absolute top-0.5 right-0.5 bg-red-500 text-white w-5 h-5 rounded-full text-xs leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+                    </div>
+                  ))}
+                  <label className="cursor-pointer w-20 h-20 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center text-2xl text-gray-400 hover:border-[#2E5E99] hover:text-[#2E5E99] transition-colors">
+                    {addImagesMutation.isPending ? '…' : '+'}
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={handleGalleryAdd} />
+                  </label>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div><label className={lbl}>{t('الاسم بالعربية', 'Name Arabic')} *</label><input value={form.name_ar} onChange={e => setForm(f => ({...f, name_ar: e.target.value}))} placeholder="طماطم طازجة" className={inp} dir="rtl" /></div>
               <div><label className={lbl}>{t('الاسم بالإنجليزية', 'Name English')} *</label><input value={form.name_en} onChange={e => setForm(f => ({...f, name_en: e.target.value}))} placeholder="Fresh Tomatoes" className={inp} dir="ltr" /></div>

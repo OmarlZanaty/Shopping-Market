@@ -44,13 +44,26 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   File? _pickedImage;
   String _imageUrl = '';
 
+  // Extra image gallery (ProductImage rows).
+  List<Map<String, dynamic>> _gallery = [];
+  bool _galleryBusy = false;
+
+  // Categories (many-to-many — a product can belong to several categories)
+  List<Map<String, dynamic>> _allCategories = [];
+  final Set<int> _selectedCategoryIds = {};
+  bool _loadingCategories = false;
+
   @override
   void initState() {
     super.initState();
     _data = Map<String, dynamic>.from(widget.product);
     _initFields(_data);
-    // If we only have list-level data (no is_active field), fetch full detail
-    if (!_data.containsKey('is_active') || !_data.containsKey('description_ar')) {
+    _loadCategories();
+    // If we only have list-level data (missing detail fields), fetch full
+    // detail — `categories` is needed to pre-select the product's chips.
+    if (!_data.containsKey('is_active') ||
+        !_data.containsKey('description_ar') ||
+        !_data.containsKey('categories')) {
       _fetchDetail();
     }
   }
@@ -71,6 +84,35 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     _isFeatured = d['is_featured'] ?? false;
     _isWeightBased = d['is_weight_based'] ?? false;
     _imageUrl = d['image_url'] ?? d['image_url_s3'] ?? '';
+    _syncGallery(d);
+    _syncSelectedCategories(d);
+  }
+
+  void _syncGallery(Map<String, dynamic> d) {
+    final imgs = d['images'];
+    if (imgs is List) {
+      _gallery = imgs
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+  }
+
+  String _galleryUrl(Map<String, dynamic> g) =>
+      (g['image_url_full'] ?? g['image_url'] ?? '').toString();
+
+  /// Parse the product's current category IDs out of its `categories` list
+  /// (`[{id, name_ar, name_en}]`) into [_selectedCategoryIds].
+  void _syncSelectedCategories(Map<String, dynamic> d) {
+    final cats = d['categories'];
+    if (cats is List) {
+      _selectedCategoryIds
+        ..clear()
+        ..addAll(cats
+            .whereType<Map>()
+            .map((c) => int.tryParse('${c['id']}'))
+            .whereType<int>());
+    }
   }
 
   @override
@@ -111,10 +153,34 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         _isFeatured = d['is_featured'] ?? _isFeatured;
         _isWeightBased = d['is_weight_based'] ?? _isWeightBased;
         _imageUrl = d['image_url'] ?? d['image_url_s3'] ?? _imageUrl;
+        _syncGallery(d);
+        if (d['categories'] is List) _syncSelectedCategories(d);
       });
     } catch (_) {
     } finally {
       if (mounted) setState(() => _loadingDetail = false);
+    }
+  }
+
+  // ── Load the store's categories for the multi-select picker ────────────────
+
+  Future<void> _loadCategories() async {
+    setState(() => _loadingCategories = true);
+    try {
+      final res = await DioClient.I.dio.get(ApiConstants.inventoryCategories);
+      final body = res.data;
+      final data = (body is Map && body['data'] is Map)
+          ? Map<String, dynamic>.from(body['data'] as Map)
+          : (body is Map ? Map<String, dynamic>.from(body) : <String, dynamic>{});
+      final list = (data['categories'] as List?) ?? const [];
+      if (!mounted) return;
+      setState(() {
+        _allCategories =
+            list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      });
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _loadingCategories = false);
     }
   }
 
@@ -135,6 +201,62 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               content: Text('فشل فتح المعرض: $e'),
               backgroundColor: AppColors.errorRed),
         );
+      }
+    }
+  }
+
+  // ── Gallery (multiple images) ──────────────────────────────────────────────
+
+  Future<void> _addGalleryImages() async {
+    if (_galleryBusy) return;
+    final pid = _data['id']?.toString();
+    if (pid == null || pid.isEmpty) return;
+    try {
+      final picker = ImagePicker();
+      final files =
+          await picker.pickMultiImage(imageQuality: 80, maxWidth: 1024);
+      if (files.isEmpty) return;
+      setState(() => _galleryBusy = true);
+      final fd = FormData();
+      for (final f in files) {
+        fd.files.add(MapEntry(
+            'images', await MultipartFile.fromFile(f.path)));
+      }
+      final resp = await DioClient.I.dio
+          .post(ApiConstants.inventoryProductImages(pid), data: fd);
+      final body = resp.data;
+      final list = (body is Map && body['data'] is List)
+          ? body['data'] as List
+          : (body is List ? body : const []);
+      if (!mounted) return;
+      setState(() {
+        _gallery =
+            list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        _galleryBusy = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _galleryBusy = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: const Text('تعذّر رفع الصور'),
+            backgroundColor: AppColors.errorRed));
+      }
+    }
+  }
+
+  Future<void> _deleteGalleryImage(int imageId) async {
+    final pid = _data['id']?.toString();
+    if (pid == null) return;
+    try {
+      await DioClient.I.dio
+          .delete(ApiConstants.inventoryProductImage(pid, imageId));
+      if (!mounted) return;
+      setState(() => _gallery.removeWhere((g) => g['id'] == imageId));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('تعذّر حذف الصورة'),
+            backgroundColor: AppColors.errorRed));
       }
     }
   }
@@ -206,6 +328,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       final String? discountPrice =
           discountText.isNotEmpty ? discountText : null;
 
+      // Capture the response so we can read the fresh image_url the backend
+      // now returns (with a ?t=<ts> cache-buster) for uploaded images.
+      Response resp;
       if (_pickedImage != null) {
         // Has image → multipart
         final formData = FormData.fromMap({
@@ -224,7 +349,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             filename: 'product_${_data['id']}.jpg',
           ),
         });
-        await DioClient.I.dio.patch(
+        // Categories as repeated form fields → backend reads getlist('category_ids').
+        for (final id in _selectedCategoryIds) {
+          formData.fields.add(MapEntry('category_ids', id.toString()));
+        }
+        resp = await DioClient.I.dio.patch(
           ApiConstants.inventoryProductDetail(_data['id'].toString()),
           data: formData,
           options: Options(contentType: 'multipart/form-data'),
@@ -243,14 +372,43 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           'description_ar': _descArCtrl.text.trim(),
           'discount_price': discountPrice,
           'image_url': _imageUrl,
+          'category_ids': _selectedCategoryIds.toList(),
         };
-        await DioClient.I.dio.patch(
+        resp = await DioClient.I.dio.patch(
           ApiConstants.inventoryProductDetail(_data['id'].toString()),
           data: body,
         );
       }
 
+      // ── Extract the new server-side image URL from the response envelope.
+      //    Backend returns: { success, data: { image_url, ... } }
+      String newImageUrl = _imageUrl;
+      try {
+        final body = resp.data;
+        final data = (body is Map && body['data'] is Map)
+            ? Map<String, dynamic>.from(body['data'] as Map)
+            : (body is Map ? Map<String, dynamic>.from(body) : <String, dynamic>{});
+        final fromServer = (data['image_url'] ?? '').toString();
+        if (fromServer.isNotEmpty) newImageUrl = fromServer;
+      } catch (_) {}
+
+      // ── Evict the OLD cached image so CachedNetworkImage can't serve
+      //    stale bytes (it caches by URL key, so if the filename happens to
+      //    repeat the cache would hide the upload).
+      if (_imageUrl.isNotEmpty && _imageUrl != newImageUrl) {
+        try {
+          await CachedNetworkImage.evictFromCache(_imageUrl);
+        } catch (_) {}
+      }
+
       if (!mounted) return;
+      // Reflect the new URL locally so the screen shows the fresh image
+      // (and drop the picked-file preview now that the server has its copy).
+      setState(() {
+        _imageUrl = newImageUrl;
+        _pickedImage = null;
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('✓ تم الحفظ بنجاح'),
@@ -259,7 +417,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         ),
       );
 
-      // Return the updated fields so the grid card refreshes
+      // Return the updated fields so the grid card refreshes — always pass
+      // the SERVER url (with cache-buster) so the parent's Image.network
+      // reloads instead of trying to read a now-stale local file path.
       Navigator.of(context).pop({
         'name_ar': _nameArCtrl.text.trim(),
         'name_en': _nameEnCtrl.text.trim(),
@@ -270,10 +430,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         'is_active': _isActive,
         'is_featured': _isFeatured,
         'is_weight_based': _isWeightBased,
-        if (_pickedImage != null)
-          'image_url': _pickedImage!.path // local path until reload
-        else
-          'image_url': _imageUrl,
+        'image_url': newImageUrl,
       });
     } catch (e) {
       if (!mounted) return;
@@ -337,6 +494,77 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             imageUrl: _imageUrl,
             pickedImage: _pickedImage,
             onTap: _showImageOptions,
+          ),
+          const SizedBox(height: 16),
+
+          // ── Extra images gallery ───────────────────────────────────────────
+          _SectionCard(
+            title: 'صور إضافية',
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: SizedBox(
+                  height: 84,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final g in _gallery)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Stack(children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: CachedNetworkImage(
+                                imageUrl: _galleryUrl(g),
+                                width: 80, height: 80, fit: BoxFit.cover,
+                                errorWidget: (_, __, ___) => Container(
+                                    width: 80, height: 80,
+                                    color: AppColors.backgroundSecondary,
+                                    child: const Icon(Icons.broken_image,
+                                        color: AppColors.textSecondary)),
+                              ),
+                            ),
+                            Positioned(
+                              top: 2, right: 2,
+                              child: GestureDetector(
+                                onTap: () => _deleteGalleryImage(g['id'] as int),
+                                child: Container(
+                                  decoration: const BoxDecoration(
+                                      color: AppColors.errorRed,
+                                      shape: BoxShape.circle),
+                                  padding: const EdgeInsets.all(2),
+                                  child: const Icon(Icons.close,
+                                      size: 14, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ]),
+                        ),
+                      // Add button
+                      GestureDetector(
+                        onTap: _galleryBusy ? null : _addGalleryImages,
+                        child: Container(
+                          width: 80, height: 80,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                                color: AppColors.divider, width: 1.5),
+                          ),
+                          child: Center(
+                            child: _galleryBusy
+                                ? const SizedBox(
+                                    width: 20, height: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Icon(Icons.add_a_photo_outlined,
+                                    color: AppColors.textSecondary),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 20),
 
@@ -410,6 +638,88 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 controller: _stockCtrl,
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── Categories (multi-select) ──────────────────────────────────────
+          _SectionCard(
+            title: 'الفئات',
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: _loadingCategories
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(8),
+                          child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.accentOrange)),
+                        ),
+                      )
+                    : _allCategories.isEmpty
+                        ? const Align(
+                            alignment: Alignment.centerRight,
+                            child: Text('لا توجد فئات متاحة',
+                                style: TextStyle(
+                                    color: AppColors.textSecondary,
+                                    fontSize: 13)),
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 10, right: 2),
+                                child: Text('اختر فئة واحدة أو أكثر',
+                                    style: TextStyle(
+                                        color: AppColors.textSecondary,
+                                        fontSize: 11)),
+                              ),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: _allCategories.map((c) {
+                                  final id =
+                                      int.tryParse('${c['id']}') ?? -1;
+                                  final selected =
+                                      _selectedCategoryIds.contains(id);
+                                  final name = (c['name_ar'] ??
+                                          c['name_en'] ??
+                                          '')
+                                      .toString();
+                                  return FilterChip(
+                                    label: Text(name),
+                                    selected: selected,
+                                    showCheckmark: true,
+                                    checkmarkColor: Colors.white,
+                                    labelStyle: TextStyle(
+                                        color: selected
+                                            ? Colors.white
+                                            : AppColors.textPrimary,
+                                        fontSize: 13),
+                                    backgroundColor:
+                                        AppColors.backgroundPrimary,
+                                    selectedColor: AppColors.accentOrange,
+                                    side: BorderSide(
+                                        color: selected
+                                            ? AppColors.accentOrange
+                                            : AppColors.divider),
+                                    onSelected: (v) => setState(() {
+                                      if (v) {
+                                        _selectedCategoryIds.add(id);
+                                      } else {
+                                        _selectedCategoryIds.remove(id);
+                                      }
+                                    }),
+                                  );
+                                }).toList(),
+                              ),
+                            ],
+                          ),
               ),
             ],
           ),

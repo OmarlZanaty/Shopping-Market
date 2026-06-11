@@ -5,6 +5,7 @@ import '../../../models/models.dart';
 import '../../../providers/cart_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../utils/constants.dart';
+import '../../../widgets/shared/full_screen_image_viewer.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final String productId;
@@ -17,6 +18,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   ProductModel? _product;
   bool _loading = true;
   double _quantity = 1;
+  final _imgController = PageController();
+  int _imgIndex = 0;
+
+  @override
+  void dispose() { _imgController.dispose(); super.dispose(); }
+
+  // Waitlist state — initialised once the product loads
+  bool _onWaitlist = false;
+  bool _waitlistLoading = false;
 
   @override
   void initState() { super.initState(); _load(); }
@@ -24,8 +34,43 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   Future<void> _load() async {
     try {
       final p = await _api.getProduct(widget.productId);
-      if (mounted) setState(() { _product = p; _loading = false; });
+      if (mounted) setState(() {
+        _product    = p;
+        _onWaitlist = p.isOnWaitlist;
+        _loading    = false;
+      });
     } catch (_) { if (mounted) setState(() => _loading = false); }
+  }
+
+  Future<void> _toggleWaitlist() async {
+    if (_waitlistLoading || _product == null) return;
+    setState(() => _waitlistLoading = true);
+    final wasOn = _onWaitlist;
+    try {
+      if (wasOn) {
+        await _api.removeFromWaitlist(_product!.id);
+      } else {
+        await _api.addToWaitlist(_product!.id);
+      }
+      if (!mounted) return;
+      setState(() {
+        _onWaitlist      = !wasOn;
+        _waitlistLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          _onWaitlist
+              ? 'سيتم إشعارك فور توفر المنتج ✅'
+              : 'تم إلغاء الاشتراك من قائمة الانتظار',
+          style: const TextStyle(fontFamily: 'Cairo'),
+        ),
+        backgroundColor: _onWaitlist ? AppColors.mint : AppColors.textMuted,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ));
+    } catch (_) {
+      if (mounted) setState(() => _waitlistLoading = false);
+    }
   }
 
   @override
@@ -41,10 +86,46 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         SliverAppBar(expandedHeight: 280, pinned: true, backgroundColor: AppColors.seafoam,
           flexibleSpace: FlexibleSpaceBar(
             background: Stack(children: [
-              if (p.mainImageUrl.isNotEmpty)
-                CachedNetworkImage(imageUrl: p.mainImageUrl, width: double.infinity, height: double.infinity, fit: BoxFit.cover)
+              if (p.allImageUrls.isNotEmpty)
+                Positioned.fill(
+                  child: PageView.builder(
+                    controller: _imgController,
+                    itemCount: p.allImageUrls.length,
+                    onPageChanged: (i) => setState(() => _imgIndex = i),
+                    itemBuilder: (_, i) => GestureDetector(
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => FullScreenImageViewer(
+                            images: p.allImageUrls, initialIndex: i),
+                      )),
+                      child: CachedNetworkImage(
+                          imageUrl: p.allImageUrls[i],
+                          width: double.infinity, height: double.infinity,
+                          fit: BoxFit.cover),
+                    ),
+                  ),
+                )
               else
                 Container(color: AppColors.ice, child: const Center(child: Icon(Icons.shopping_bag_outlined, color: AppColors.sky, size: 80))),
+              // Page dots (only when there's more than one image)
+              if (p.allImageUrls.length > 1)
+                Positioned(
+                  bottom: 12, left: 0, right: 0,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(p.allImageUrls.length, (i) {
+                      final active = i == _imgIndex;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        width: active ? 18 : 7, height: 7,
+                        decoration: BoxDecoration(
+                          color: active ? AppColors.coral : Colors.white70,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
               if (p.isOnSale) Positioned(bottom: 16, left: 16,
                 child: Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(color: AppColors.watermelon, borderRadius: BorderRadius.circular(100)),
@@ -105,13 +186,38 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 })),
               const SizedBox(height: 16),
             ],
-            // Waitlist button
+            // Waitlist button — shown when product is out of stock
             if (outOfStock)
-              SizedBox(width: double.infinity, height: 50, child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.sapphire, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-                icon: const Icon(Icons.notifications_outlined, color: Colors.white),
-                label: const Text('أبلغني عند التوفر', style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
-                onPressed: () async { await _api.toggleWaitlist(p.id); if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('سيتم إخطارك عند التوفر ✅', style: TextStyle(fontFamily: 'Cairo')), backgroundColor: AppColors.mint)); })),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _onWaitlist
+                        ? AppColors.gold
+                        : AppColors.sapphire,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  icon: _waitlistLoading
+                      ? const SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : Icon(
+                          _onWaitlist
+                              ? Icons.notifications_active_rounded
+                              : Icons.notifications_outlined,
+                          color: Colors.white,
+                        ),
+                  label: Text(
+                    _onWaitlist ? 'مشترك — اضغط لإلغاء الاشتراك' : 'أبلغني عند التوفر',
+                    style: const TextStyle(
+                        fontFamily: 'Cairo', fontWeight: FontWeight.w700),
+                  ),
+                  onPressed: _waitlistLoading ? null : _toggleWaitlist,
+                ),
+              ),
           ]),
         )),
       ]),

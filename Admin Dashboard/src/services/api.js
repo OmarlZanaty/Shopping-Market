@@ -53,6 +53,12 @@ export const productApi = {
   toggle: (id) => api.patch(`/products/admin/products/${id}/availability/`),
   bulkPrice: (updates) => api.post('/products/admin/products/bulk/', { updates }),
   byBarcode: (barcode) => api.get(`/products/barcode/${barcode}/`),
+  // Image gallery (multiple images per product)
+  listImages: (id) => api.get(`/products/admin/products/${id}/images/`),
+  addImages: (id, formData) => api.post(`/products/admin/products/${id}/images/`, formData),
+  deleteImage: (id, imageId) => api.delete(`/products/admin/products/${id}/images/${imageId}/`),
+  setPrimaryImage: (id, imageId) =>
+    api.patch(`/products/admin/products/${id}/images/${imageId}/`, { is_primary: true }),
   // Waitlist
   waitlist: (id) => api.get(`/products/admin/products/${id}/waitlist/`),
   notifyWaitlist: (id) => api.post(`/products/admin/products/${id}/notify-waitlist/`),

@@ -48,8 +48,18 @@ class UserModel {
   );
 
   Map<String, dynamic> toJson() => {
-    'id': id, 'phone': phone, 'full_name': fullName,
-    'email': email, 'role': role,
+    'id': id,
+    'phone': phone,
+    'full_name': fullName,
+    'email': email,
+    'role': role,
+    'avatar_url': avatarUrl,
+    'wallet_balance': walletBalance.toString(),
+    'loyalty_points': loyaltyPoints,
+    'order_streak': orderStreak,
+    'rating': rating?.toString(),
+    'is_online': isOnline,
+    'fcm_token': fcmToken,
   };
 
   UserModel copyWith({String? fcmToken, int? loyaltyPoints, double? walletBalance}) => UserModel(
@@ -152,11 +162,17 @@ class ProductModel {
   final bool isFeatured;
   final String sellUnit;
   final String mainImageUrl;
+  /// Extra gallery image URLs (from the ProductImage table).
+  final List<String> galleryUrls;
   final List<CategoryModel> categories;
   final List<ProductModel> alternatives;
   final List<ProductModel> related;
   final bool isOnSale;
   final bool isOutOfStock;
+  /// True when the authenticated customer has already joined this product's waitlist.
+  final bool isOnWaitlist;
+  /// Number of pending (un-notified) waitlist entries — populated in admin responses.
+  final int waitlistCount;
 
   const ProductModel({
     required this.id,
@@ -174,11 +190,14 @@ class ProductModel {
     this.isFeatured = false,
     this.sellUnit = 'piece',
     this.mainImageUrl = '',
+    this.galleryUrls = const [],
     this.categories = const [],
     this.alternatives = const [],
     this.related = const [],
     this.isOnSale = false,
     this.isOutOfStock = false,
+    this.isOnWaitlist = false,
+    this.waitlistCount = 0,
   });
 
   factory ProductModel.fromJson(Map<String, dynamic> j) => ProductModel(
@@ -197,16 +216,35 @@ class ProductModel {
     isFeatured:          j['is_featured'] ?? false,
     sellUnit:            j['sell_unit'] ?? 'piece',
     mainImageUrl:        j['image_url_s3'] ?? j['thumbnail_url'] ?? j['main_image_url'] ?? j['image_url'] ?? '',
+    galleryUrls:         (j['images'] as List? ?? [])
+                            .map((im) => (im is Map
+                                ? (im['image_url_full'] ?? im['image_url'] ?? '')
+                                : '').toString())
+                            .where((u) => u.isNotEmpty)
+                            .toList()
+                            .cast<String>(),
     categories:          (j['categories'] as List? ?? []).map((c) => CategoryModel.fromJson(c)).toList(),
     alternatives:        (j['alternatives'] as List? ?? []).map((p) => ProductModel.fromJson(p)).toList(),
     related:             (j['related'] as List? ?? []).map((p) => ProductModel.fromJson(p)).toList(),
     isOnSale:            j['is_on_sale'] ?? false,
     isOutOfStock:        j['is_out_of_stock'] ?? false,
+    isOnWaitlist:        j['is_on_waitlist'] ?? false,
+    waitlistCount:       j['waitlist_count'] ?? 0,
   );
 
   String name(String lang) => lang == 'ar' ? nameAr : nameEn;
   String description(String lang) => lang == 'ar' ? descriptionAr : descriptionEn;
   double get savings => originalPrice - currentPrice;
+
+  /// All images for the carousel: main image first, then the gallery, deduped.
+  List<String> get allImageUrls {
+    final urls = <String>[];
+    if (mainImageUrl.isNotEmpty) urls.add(mainImageUrl);
+    for (final u in galleryUrls) {
+      if (u.isNotEmpty && !urls.contains(u)) urls.add(u);
+    }
+    return urls;
+  }
 }
 
 // ─── Cart Item ─────────────────────────────────────────────────────────────────
@@ -294,7 +332,7 @@ class OrderModel {
       id:              j['id'] ?? '',
       orderId:         j['order_id'] ?? '',
       status:          j['status'] ?? 'new',
-      customerName:    j['customer_name'],
+      customerName:    j['customer_name'] ?? j['delivery_name'] ?? (j['customer_info'] as Map<String, dynamic>?)?['name'],
       driverName:      driverInfo?['name'],
       driverPhone:     driverInfo?['phone'],
       driverLat:       double.tryParse(driverInfo?['latitude']?.toString() ?? ''),
@@ -396,6 +434,15 @@ class OrderAdjustmentModel {
   final String reason;
   final bool? customerApproved;
   final double? newTotal;
+  /// FK to the OrderItem (null on order-level adjustments). Used to group
+  /// multiple substitute suggestions for the SAME line item.
+  final int? orderItemId;
+  /// "pending" | "approved" | "rejected" (or null on legacy records).
+  final String? approvalStatus;
+  /// Parsed substitute payload from the backend (only set for
+  /// `substitute_suggested` / `substitute` adjustments). Keys:
+  /// `product_id`, `name_ar`, `name_en`, `barcode`, `price`, `image_url`.
+  final Map<String, dynamic>? substituteInfo;
 
   const OrderAdjustmentModel({
     required this.id,
@@ -405,17 +452,41 @@ class OrderAdjustmentModel {
     this.reason = '',
     this.customerApproved,
     this.newTotal,
+    this.orderItemId,
+    this.approvalStatus,
+    this.substituteInfo,
   });
 
-  factory OrderAdjustmentModel.fromJson(Map<String, dynamic> j) => OrderAdjustmentModel(
-    id:               j['id'],
-    adjustmentType:   j['adjustment_type'] ?? '',
-    oldValue:         j['old_value'] ?? '',
-    newValue:         j['new_value'] ?? '',
-    reason:           j['reason'] ?? '',
-    customerApproved: j['customer_approved'],
-    newTotal:         j['new_total'] != null ? double.tryParse(j['new_total'].toString()) : null,
-  );
+  /// True iff the customer hasn't responded yet (pending or null status).
+  bool get isPending =>
+      (approvalStatus == null || approvalStatus == 'pending') &&
+      customerApproved == null;
+
+  factory OrderAdjustmentModel.fromJson(Map<String, dynamic> j) {
+    int? _itemId() {
+      final v = j['order_item'];
+      if (v is int) return v;
+      if (v is String) return int.tryParse(v);
+      return null;
+    }
+    Map<String, dynamic>? _sub() {
+      final v = j['substitute_info'];
+      if (v is Map) return Map<String, dynamic>.from(v);
+      return null;
+    }
+    return OrderAdjustmentModel(
+      id:               j['id'],
+      adjustmentType:   j['adjustment_type'] ?? j['action_type'] ?? '',
+      oldValue:         j['old_value'] ?? '',
+      newValue:         j['new_value'] ?? '',
+      reason:           j['reason'] ?? '',
+      customerApproved: j['customer_approved'],
+      newTotal:         j['new_total'] != null ? double.tryParse(j['new_total'].toString()) : null,
+      orderItemId:      _itemId(),
+      approvalStatus:   j['customer_approval_status']?.toString(),
+      substituteInfo:   _sub(),
+    );
+  }
 }
 
 class OrderRatingModel {
