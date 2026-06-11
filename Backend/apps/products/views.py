@@ -9,6 +9,7 @@ from .models import Product, Category, Banner, MediaLibrary, StockWaitlist, Prod
 from .serializers import (
     ProductSerializer, ProductListSerializer, CategorySerializer,
     BannerSerializer, MediaLibrarySerializer, ProductCreateSerializer,
+    ProductImageSerializer,
 )
 from apps.users.permissions import IsAdminUser
 from apps.core.permissions import IsAdminWriteOrSupportRead
@@ -298,6 +299,59 @@ class AdminProductDetailView(generics.RetrieveUpdateDestroyAPIView):
         product.is_available = False
         product.save(update_fields=['is_available'])
         return ok({'id': str(product.id), 'is_available': False}, message='Soft-deleted')
+
+
+class AdminProductImagesView(APIView):
+    """GET list / POST upload gallery images for a product."""
+    permission_classes = [permissions.IsAuthenticated, IsAdminWriteOrSupportRead]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def _product(self, request, product_id):
+        return scope_to_user(Product.objects.all(), request.user).filter(id=product_id).first()
+
+    def get(self, request, product_id):
+        from .image_gallery import serialize_gallery
+        product = self._product(request, product_id)
+        if not product:
+            return fail('Product not found', status_code=404)
+        return ok(serialize_gallery(product, request))
+
+    def post(self, request, product_id):
+        from .image_gallery import add_gallery_images, serialize_gallery
+        product = self._product(request, product_id)
+        if not product:
+            return fail('Product not found', status_code=404)
+        created, err = add_gallery_images(product, request)
+        if err:
+            return fail(err, status_code=400)
+        return ok(serialize_gallery(product, request),
+                  message=f'{len(created)} image(s) added')
+
+
+class AdminProductImageDetailView(APIView):
+    """PATCH (reorder / set primary / alt) or DELETE a gallery image."""
+    permission_classes = [permissions.IsAuthenticated, IsAdminWriteOrSupportRead]
+
+    def _image(self, request, product_id, pk):
+        product = scope_to_user(Product.objects.all(), request.user).filter(id=product_id).first()
+        if not product:
+            return None
+        return product.images.filter(pk=pk).first()
+
+    def patch(self, request, product_id, pk):
+        from .image_gallery import update_gallery_image
+        image = self._image(request, product_id, pk)
+        if not image:
+            return fail('Image not found', status_code=404)
+        update_gallery_image(image, request.data)
+        return ok(ProductImageSerializer(image, context={'request': request}).data)
+
+    def delete(self, request, product_id, pk):
+        image = self._image(request, product_id, pk)
+        if not image:
+            return fail('Image not found', status_code=404)
+        image.delete()
+        return ok({'id': pk}, message='Image deleted')
 
 
 class AdminToggleAvailabilityView(APIView):

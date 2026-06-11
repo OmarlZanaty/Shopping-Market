@@ -822,8 +822,13 @@ class AgentProductDetailView(APIView):
             'is_weight_based': product.is_weight_based,
             'sell_unit': product.sell_unit,
             'image_url': image_url,
+            'images': self._gallery(product, request),
             'categories': cats,
         })
+
+    def _gallery(self, product, request):
+        from apps.products.image_gallery import serialize_gallery
+        return serialize_gallery(product, request)
 
     def patch(self, request, product_id):
         product = self._get_product(request, product_id)
@@ -952,6 +957,67 @@ class AgentProductDetailView(APIView):
             'image_url': image_url,
             'categories': list(product.categories.values('id', 'name_ar', 'name_en')),
         })
+
+
+# ─── Product image gallery (agent can edit all images) ────────────────────────
+
+class AgentProductImagesView(APIView):
+    """GET list / POST upload gallery images for a product (agent, store-scoped)."""
+    permission_classes = [permissions.IsAuthenticated, IsAgent]
+
+    def _product(self, request, product_id):
+        qs = Product.objects.all()
+        if request.user.store_id:
+            qs = qs.filter(store_id=request.user.store_id)
+        return qs.filter(pk=product_id).first()
+
+    def get(self, request, product_id):
+        from apps.products.image_gallery import serialize_gallery
+        product = self._product(request, product_id)
+        if not product:
+            return fail('Product not found', status_code=404)
+        return ok(serialize_gallery(product, request))
+
+    def post(self, request, product_id):
+        from apps.products.image_gallery import add_gallery_images, serialize_gallery
+        product = self._product(request, product_id)
+        if not product:
+            return fail('Product not found', status_code=404)
+        created, err = add_gallery_images(product, request)
+        if err:
+            return fail(err, status_code=400)
+        return ok(serialize_gallery(product, request),
+                  message=f'{len(created)} image(s) added')
+
+
+class AgentProductImageDetailView(APIView):
+    """PATCH (reorder / set primary) or DELETE a gallery image (agent)."""
+    permission_classes = [permissions.IsAuthenticated, IsAgent]
+
+    def _image(self, request, product_id, pk):
+        qs = Product.objects.all()
+        if request.user.store_id:
+            qs = qs.filter(store_id=request.user.store_id)
+        product = qs.filter(pk=product_id).first()
+        if not product:
+            return None
+        return product.images.filter(pk=pk).first()
+
+    def patch(self, request, product_id, pk):
+        from apps.products.image_gallery import update_gallery_image
+        from apps.products.serializers import ProductImageSerializer
+        image = self._image(request, product_id, pk)
+        if not image:
+            return fail('Image not found', status_code=404)
+        update_gallery_image(image, request.data)
+        return ok(ProductImageSerializer(image, context={'request': request}).data)
+
+    def delete(self, request, product_id, pk):
+        image = self._image(request, product_id, pk)
+        if not image:
+            return fail('Image not found', status_code=404)
+        image.delete()
+        return ok({'id': pk}, message='Image deleted')
 
 
 # ─── Categories (for product assignment) ──────────────────────────────────────
