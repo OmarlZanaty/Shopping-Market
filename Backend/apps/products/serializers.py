@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from .models import Product, Category, Banner, MediaLibrary, ProductImage, ProductBranch
-from apps.core.validators import validate_image_upload, validate_hex_color
+from apps.core.validators import validate_image_upload, validate_hex_color, optimize_image_file
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -147,7 +147,8 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         }
 
     def validate_main_image(self, value):
-        return validate_image_upload(value)
+        validate_image_upload(value)
+        return optimize_image_file(value)
 
     def get_main_image_url(self, obj):
         if obj.image_url_s3:

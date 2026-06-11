@@ -55,6 +55,63 @@ def validate_image_upload(file_obj):
     return file_obj
 
 
+def optimize_image_file(file_obj, *, max_dim=800):
+    """
+    Downscale an uploaded image to ``max_dim`` on its longest edge and
+    recompress it, keeping the original format/extension. Product photos are
+    frequently 1–2 MB originals; serving those in list grids is slow. Returns a
+    Django ContentFile (same name) ready to assign to an ImageField, or the
+    original ``file_obj`` if processing isn't possible.
+    """
+    try:
+        from io import BytesIO
+        from PIL import Image
+        from django.core.files.base import ContentFile
+
+        name = getattr(file_obj, 'name', '') or 'image'
+        ext = name.rsplit('.', 1)[-1].lower() if '.' in name else 'jpg'
+
+        try:
+            file_obj.seek(0)
+        except Exception:
+            pass
+        img = Image.open(file_obj)
+
+        is_png = ext == 'png'
+        is_webp = ext == 'webp'
+        if not is_png and not is_webp:
+            ext = 'jpg'
+
+        # Flatten transparency onto white for JPEG (which has no alpha).
+        if ext == 'jpg' and img.mode in ('RGBA', 'LA', 'P'):
+            img = img.convert('RGBA')
+            bg = Image.new('RGBA', img.size, (255, 255, 255, 255))
+            img = Image.alpha_composite(bg, img).convert('RGB')
+        elif img.mode == 'P':
+            img = img.convert('RGBA')
+
+        # Only downscale; never upscale.
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.LANCZOS)
+
+        buf = BytesIO()
+        if is_png:
+            img.save(buf, format='PNG', optimize=True)
+        elif is_webp:
+            img.save(buf, format='WEBP', quality=82, method=4)
+        else:
+            img.save(buf, format='JPEG', quality=82, optimize=True, progressive=True)
+        buf.seek(0)
+        return ContentFile(buf.read(), name=name)
+    except Exception:
+        # Any decode/encode failure — fall back to the original upload.
+        try:
+            file_obj.seek(0)
+        except Exception:
+            pass
+        return file_obj
+
+
 def safe_filename(name):
     """Strip risky chars from an uploaded filename."""
     if not name:
