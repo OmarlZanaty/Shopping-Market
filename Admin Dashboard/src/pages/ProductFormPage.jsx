@@ -117,9 +117,11 @@ export default function ProductFormPage() {
   });
 
   const handleGalleryAdd = (e) => {
-    const files = e.target.files;
-    if (files && files.length) addImagesMutation.mutate(files);
+    // Copy to an array first — resetting e.target.value clears the live
+    // FileList, and the mutation reads it asynchronously.
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
+    if (files.length) addImagesMutation.mutate(files);
   };
 
   const inp = 'w-full border-2 border-gray-100 focus:border-[#2E5E99] rounded-xl px-4 py-2.5 text-sm outline-none transition-colors';
