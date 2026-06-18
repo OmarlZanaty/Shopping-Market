@@ -11,7 +11,7 @@ import { persist } from 'zustand/middleware';
 import axios from 'axios';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL
-  || 'http://63.33.70.240:8000/api/v1';
+  || 'http://34.124.228.3:8000/api/v1';
 
 // Roles allowed to access the admin dashboard.
 const ALLOWED_ROLES = ['admin', 'branch_manager', 'support', 'super_admin'];
