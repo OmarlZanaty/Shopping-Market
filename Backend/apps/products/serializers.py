@@ -6,17 +6,29 @@ from apps.core.validators import validate_image_upload, validate_hex_color, opti
 
 class CategorySerializer(serializers.ModelSerializer):
     product_count = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Category
         fields = '__all__'
         extra_kwargs = {
-            # store is injected server-side (enforce_store_id_on_create)
             'store': {'required': False},
         }
 
     def get_product_count(self, obj):
         return obj.products.filter(is_available=True).count()
+
+    def get_image_url(self, obj):
+        if obj.icon_url:
+            return obj.icon_url
+        if obj.image:
+            request = self.context.get('request')
+            if request:
+                try:
+                    return request.build_absolute_uri(obj.image.url)
+                except Exception:
+                    pass
+        return ''
 
     def validate_color_hex(self, value):
         return validate_hex_color(value) or ''

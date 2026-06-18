@@ -66,8 +66,16 @@ export const productApi = {
 
 export const categoryApi = {
   list: () => api.get('/products/admin/categories/'),
-  create: (data) => api.post('/products/admin/categories/', data),
-  update: (id, data) => api.patch(`/products/admin/categories/${id}/`, data),
+  create: (data) => {
+    const fd = new FormData();
+    Object.entries(data).forEach(([k, v]) => { if (v !== undefined && v !== null) fd.append(k, v); });
+    return api.post('/products/admin/categories/', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  update: (id, data) => {
+    const fd = new FormData();
+    Object.entries(data).forEach(([k, v]) => { if (v !== undefined && v !== null) fd.append(k, v); });
+    return api.patch(`/products/admin/categories/${id}/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
   delete: (id) => api.delete(`/products/admin/categories/${id}/`),
 };
 
