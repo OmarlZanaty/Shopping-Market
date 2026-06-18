@@ -8,10 +8,22 @@ from apps.users.models import Address
 class OrderItemSerializer(serializers.ModelSerializer):
     product_image = serializers.SerializerMethodField()
     line_total = serializers.ReadOnlyField()
+    # Weight flag lives on Product, not OrderItem — surface it so the agent
+    # picking screen can show weight-based items in grams/kg instead of pieces.
+    is_weight_based = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderItem
         fields = '__all__'
+
+    def get_is_weight_based(self, obj):
+        try:
+            if obj.product and obj.product.is_weight_based:
+                return True
+        except Exception:
+            pass
+        # Fallback: infer from the unit captured at order time.
+        return obj.unit_type in ('kg', 'gram', 'liter')
 
     def get_product_image(self, obj):
         try:
