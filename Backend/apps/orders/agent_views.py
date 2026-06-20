@@ -752,14 +752,22 @@ class AgentInventoryListView(APIView):
             'id', 'name_ar', 'name_en', 'barcode',
             'current_price', 'original_price',
             'is_available', 'is_active', 'quantity_in_stock',
-            'is_weight_based', 'image_url_s3', 'thumbnail_url',
+            'is_weight_based', 'image_url_s3', 'thumbnail_url', 'main_image',
         ))
 
         for p in products:
             p['id'] = str(p['id'])
             p['current_price'] = float(p['current_price']) if p['current_price'] is not None else 0.0
             p['original_price'] = float(p['original_price']) if p['original_price'] is not None else 0.0
-            p['image_url'] = p.pop('image_url_s3') or p.pop('thumbnail_url', '') or ''
+            main_image = p.pop('main_image', '') or ''
+            image_url = p.pop('image_url_s3') or p.pop('thumbnail_url', '') or ''
+            if not image_url and main_image:
+                try:
+                    from django.conf import settings
+                    image_url = request.build_absolute_uri(settings.MEDIA_URL + main_image)
+                except Exception:
+                    pass
+            p['image_url'] = image_url
 
         return Response({
             'success': True,
