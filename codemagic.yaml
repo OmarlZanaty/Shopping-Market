@@ -1,0 +1,44 @@
+workflows:
+  ios-customer-release:
+    name: iOS Customer – App Store / TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 90
+    # The Flutter customer app lives in this subfolder of the repo.
+    working_directory: "Shopping Market"
+    integrations:
+      # This name MUST match the App Store Connect API key you add in
+      # Codemagic → Teams/User settings → Integrations → App Store Connect.
+      app_store_connect: ShoppingMarket ASC Key
+    environment:
+      ios_signing:
+        # Codemagic auto-creates the distribution cert + provisioning profile
+        # from your App Store Connect API key — no Mac needed.
+        distribution_type: app_store
+        bundle_identifier: com.almobarmg.shoppingmarket
+      vars:
+        BUNDLE_ID: "com.almobarmg.shoppingmarket"
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Get Flutter packages
+        script: flutter pub get
+      - name: Install CocoaPods dependencies
+        script: find . -name "Podfile" -execdir pod install \;
+      - name: Set up provisioning profiles
+        script: xcode-project use-profiles
+      - name: Flutter build IPA
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Uploads the build to TestFlight automatically. Flip to a production
+        # submission later once TestFlight looks good.
+        submit_to_testflight: true
+        # Leave beta groups empty until you create one in App Store Connect.
