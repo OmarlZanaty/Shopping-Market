@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from django.utils import timezone
 from django.core.cache import cache
 
@@ -53,6 +54,11 @@ class StaffLoginView(APIView):
         return fail('Invalid credentials', errors=serializer.errors, status_code=401)
 
 
+PHONE_ALREADY_REGISTERED_MESSAGE = (
+    'رقم الهاتف مسجّل بالفعل بحساب آخر. الرجاء تسجيل الدخول باستخدام رقم الهاتف.'
+)
+
+
 class SocialLoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -66,13 +72,20 @@ class SocialLoginView(APIView):
             phone = data.get('phone', '')
             if not phone:
                 return fail('Phone required for new social signup', status_code=400)
-            user = User.objects.create_user(
-                phone=phone,
-                full_name=data.get('full_name', ''),
-                email=data.get('email', ''),
-                login_type=data['provider'],
-                social_id=data['social_id'],
-            )
+            if User.objects.filter(phone=phone).exists():
+                return fail(PHONE_ALREADY_REGISTERED_MESSAGE, status_code=409)
+            try:
+                user = User.objects.create_user(
+                    phone=phone,
+                    full_name=data.get('full_name', ''),
+                    email=data.get('email', ''),
+                    login_type=data['provider'],
+                    social_id=data['social_id'],
+                )
+            except IntegrityError:
+                # Safety net for a race between the existence check above and
+                # the insert (e.g. a concurrent signup with the same phone).
+                return fail(PHONE_ALREADY_REGISTERED_MESSAGE, status_code=409)
             created = True
         else:
             user = data['user']
