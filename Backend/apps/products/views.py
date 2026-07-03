@@ -560,26 +560,91 @@ class MediaLibraryDetailView(generics.RetrieveDestroyAPIView):
     queryset = MediaLibrary.objects.all()
 
 
-# Import (Excel/CSV) — handed off to a Celery task
+# Import (Excel/CSV, upsert by barcode) — synchronous with dry-run support
 class AdminProductImportView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsAdminWriteOrSupportRead]
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
     parser_classes = [MultiPartParser]
 
     def post(self, request):
+        from . import importer
+        from .models import ProductImportJob
+
         upload = request.FILES.get('file')
         if not upload:
             return fail('file is required (multipart field "file")', status_code=400)
-        # Save to a tmp path & queue
-        import tempfile
-        suffix = '.xlsx' if upload.name.lower().endswith('xlsx') else '.csv'
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        for chunk in upload.chunks():
-            tmp.write(chunk)
-        tmp.close()
+        name = upload.name.lower()
+        if not (name.endswith('.xlsx') or name.endswith('.csv')):
+            return fail('Only .xlsx and .csv files are supported', status_code=400)
+
+        dry_run = str(request.data.get('dry_run', '')).lower() in ('1', 'true')
+        store_id = request.data.get('store_id')
         try:
-            from apps.orders.tasks import process_product_import
-            store_id = getattr(request.user, 'store_id', None) or request.data.get('store_id')
-            task = process_product_import.delay(tmp.name, int(store_id) if store_id else None)
-            return ok({'queued': True, 'task_id': task.id})
+            store_id = int(store_id) if store_id else None
+        except (ValueError, TypeError):
+            store_id = None
+
+        try:
+            rows = importer.parse_file(upload, upload.name)
         except Exception as e:
-            return fail(f'Failed to queue import: {e}', status_code=500)
+            return fail(f'Could not read file: {e}', status_code=400)
+        if not rows:
+            return fail('File contains no data rows', status_code=400)
+
+        result = importer.run_import(rows, request.user, store_id, dry_run=dry_run)
+        result['dry_run'] = dry_run
+
+        if not dry_run:
+            ProductImportJob.objects.create(
+                store_id=getattr(request.user, 'store_id', None) or store_id,
+                user=request.user,
+                filename=upload.name,
+                total_rows=result['total_rows'],
+                created_count=result['created'],
+                updated_count=result['updated'],
+                error_count=len(result['errors']),
+                errors=result['errors'][:500],
+                warnings=result['warnings'][:500],
+            )
+        return ok(result)
+
+
+class AdminProductImportTemplateView(APIView):
+    """GET template .xlsx; ?include=products fills it with existing products."""
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get(self, request):
+        from django.http import HttpResponse
+        from . import importer
+
+        products = None
+        filename = 'product_import_template.xlsx'
+        if request.query_params.get('include') == 'products':
+            products = scope_to_user(Product.objects.all(), request.user).prefetch_related('categories')
+            filename = 'products_export.xlsx'
+        wb = importer.build_template_workbook(products)
+        resp = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        resp['Content-Disposition'] = f'attachment; filename="{filename}"'
+        wb.save(resp)
+        return resp
+
+
+class AdminProductImportHistoryView(APIView):
+    """GET list of past imports (most recent first)."""
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get(self, request):
+        from .models import ProductImportJob
+        qs = scope_to_user(ProductImportJob.objects.select_related('user'), request.user)[:50]
+        return ok([{
+            'id': j.id,
+            'filename': j.filename,
+            'user': getattr(j.user, 'full_name', None) or getattr(j.user, 'phone', None) or '',
+            'total_rows': j.total_rows,
+            'created': j.created_count,
+            'updated': j.updated_count,
+            'error_count': j.error_count,
+            'errors': j.errors,
+            'warnings': j.warnings,
+            'created_at': j.created_at.isoformat(),
+        } for j in qs])

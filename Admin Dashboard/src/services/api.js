@@ -62,6 +62,23 @@ export const productApi = {
   // Waitlist
   waitlist: (id) => api.get(`/products/admin/products/${id}/waitlist/`),
   notifyWaitlist: (id) => api.post(`/products/admin/products/${id}/notify-waitlist/`),
+  // Excel/CSV import (upsert by barcode)
+  import: (file, { dryRun = false } = {}) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (dryRun) fd.append('dry_run', '1');
+    return api.post('/products/admin/products/import/', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    });
+  },
+  importTemplate: (includeProducts = false) =>
+    api.get('/products/admin/products/import/template/', {
+      params: includeProducts ? { include: 'products' } : {},
+      responseType: 'blob',
+      timeout: 120000,
+    }),
+  importHistory: () => api.get('/products/admin/products/import/history/'),
 };
 
 export const categoryApi = {

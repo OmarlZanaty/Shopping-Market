@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { productApi } from '../services/api';
+import ImportProductsModal from '../components/shared/ImportProductsModal';
 import toast from 'react-hot-toast';
 
 export default function ProductsPage() {
@@ -14,6 +15,7 @@ export default function ProductsPage() {
   const [category, setCategory] = useState('');
   const [page, setPage] = useState(1);
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [showImport, setShowImport] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-products', search, category, page],
@@ -65,13 +67,23 @@ export default function ProductsPage() {
           <h1 className="text-2xl font-bold text-[#0D2440] font-serif">{t('المنتجات', 'Products')}</h1>
           <p className="text-gray-500 text-sm">{data?.count || 0} {t('منتج', 'products')}</p>
         </div>
-        <button
-          onClick={() => navigate('/products/new')}
-          className="bg-[#2E5E99] hover:bg-[#0D2440] text-white px-5 py-2.5 rounded-xl font-semibold text-sm transition-colors flex items-center gap-2"
-        >
-          + {t('إضافة منتج', 'Add Product')}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowImport(true)}
+            className="border border-[#2E5E99] text-[#2E5E99] hover:bg-[#E7F0FA] px-5 py-2.5 rounded-xl font-semibold text-sm transition-colors flex items-center gap-2"
+          >
+            📥 {t('استيراد Excel', 'Import Excel')}
+          </button>
+          <button
+            onClick={() => navigate('/products/new')}
+            className="bg-[#2E5E99] hover:bg-[#0D2440] text-white px-5 py-2.5 rounded-xl font-semibold text-sm transition-colors flex items-center gap-2"
+          >
+            + {t('إضافة منتج', 'Add Product')}
+          </button>
+        </div>
       </div>
+
+      {showImport && <ImportProductsModal lang={lang} onClose={() => setShowImport(false)} />}
 
       {/* Search bar + barcode */}
       <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">

@@ -316,3 +316,25 @@ class Banner(models.Model):
         if self.view_count == 0:
             return 0
         return round((self.click_count / self.view_count) * 100, 2)
+
+
+class ProductImportJob(models.Model):
+    """Audit log for admin bulk product imports (Excel/CSV by barcode)."""
+    store = models.ForeignKey('stores.Store', null=True, blank=True, on_delete=models.SET_NULL,
+                              related_name='product_imports')
+    user = models.ForeignKey('users.User', null=True, blank=True, on_delete=models.SET_NULL,
+                             related_name='product_imports')
+    filename = models.CharField(max_length=255)
+    total_rows = models.PositiveIntegerField(default=0)
+    created_count = models.PositiveIntegerField(default=0)
+    updated_count = models.PositiveIntegerField(default=0)
+    error_count = models.PositiveIntegerField(default=0)
+    errors = models.JSONField(default=list, blank=True)    # [{row, barcode, reason}]
+    warnings = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.filename} ({self.created_count} new / {self.updated_count} updated)'
