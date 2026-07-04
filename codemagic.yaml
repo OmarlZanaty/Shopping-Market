@@ -14,11 +14,6 @@ workflows:
       # run a pre-flight "fetch existing profiles" that fails on a fresh account
       # ("No matching profiles found"). Instead we create the cert+profile in
       # the "Set up code signing" script below via the App Store Connect API key.
-      groups:
-        # Contains IOS_DIST_CERT_KEY: a base64 RSA private key. Reusing one key
-        # means the distribution certificate is created once and reused every
-        # build, instead of minting a new cert each time (Apple caps them at 2).
-        - ios_credentials
       vars:
         BUNDLE_ID: "com.almobarmg.shoppingmarket"
       flutter: stable
@@ -32,13 +27,16 @@ workflows:
         script: flutter pub get
       - name: Install CocoaPods dependencies
         script: find . -name "Podfile" -execdir pod install \;
-      - name: Set up code signing (reuse stored cert key, create once)
+      - name: Set up code signing (create cert + profile)
         script: |
           keychain initialize
-          # Decode the persistent private key. fetch-signing-files reuses the
-          # distribution certificate matching this key, or creates it the first
-          # time — so we never mint duplicate certs and hit Apple's limit.
-          printf '%s' "$IOS_DIST_CERT_KEY" | openssl base64 -d -A > /tmp/cert_key.pem
+          # Prefer a persistent key from env (IOS_DIST_CERT_KEY) so the cert is
+          # reused across builds; fall back to a fresh key if it isn't set.
+          if [ -n "$IOS_DIST_CERT_KEY" ]; then
+            printf '%s' "$IOS_DIST_CERT_KEY" | openssl base64 -d -A > /tmp/cert_key.pem
+          else
+            openssl genrsa 2048 > /tmp/cert_key.pem 2>/dev/null
+          fi
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --certificate-key=@file:/tmp/cert_key.pem \
