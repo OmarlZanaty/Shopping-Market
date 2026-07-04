@@ -25,8 +25,16 @@ workflows:
         script: flutter pub get
       - name: Install CocoaPods dependencies
         script: find . -name "Podfile" -execdir pod install \;
-      - name: Set up provisioning profiles
-        script: xcode-project use-profiles
+      - name: Set up code signing (create cert + profile if missing)
+        script: |
+          keychain initialize
+          # Create the distribution certificate + App Store provisioning
+          # profile automatically on a fresh account (needs an Admin ASC key).
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
       - name: Flutter build IPA
         script: |
           flutter build ipa --release \
