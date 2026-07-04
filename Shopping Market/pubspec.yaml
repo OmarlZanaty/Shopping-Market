@@ -106,3 +106,8 @@ flutter:
 
 dependency_overrides:
   intl: ^0.20.2
+  # Pin the iOS Google-sign-in impl to a build that uses GoogleSignIn 7.x /
+  # GoogleUtilities 7.x. Newer google_sign_in_ios pulls GoogleSignIn 8.0 →
+  # GoogleUtilities 8.x, which conflicts with Firebase 10.25 (GoogleUtilities
+  # 7.x) and breaks `pod install`. iOS-only; Android is unaffected.
+  google_sign_in_ios: 5.7.6
