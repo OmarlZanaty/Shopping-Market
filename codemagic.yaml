@@ -27,10 +27,12 @@ workflows:
       - name: Set up code signing (create cert + profile if missing)
         script: |
           keychain initialize
-          # Create the distribution certificate + App Store provisioning
-          # profile automatically on a fresh account (needs an Admin ASC key).
+          # A distribution certificate can only be created/saved with a private
+          # key. Generate one so app-store-connect can build+store the .p12.
+          openssl genrsa 2048 > /tmp/cert_key.pem 2>/dev/null
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
+            --certificate-key=@file:/tmp/cert_key.pem \
             --create
           keychain add-certificates
           xcode-project use-profiles
