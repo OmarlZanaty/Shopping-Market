@@ -31,7 +31,6 @@ flutter_ios_podfile_setup
 
 target 'Runner' do
   use_frameworks!
-  use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 end
@@ -42,6 +41,10 @@ post_install do |installer|
     target.build_configurations.each do |config|
       # Force every pod to iOS 15.0 so plugins like awesome_notifications build.
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      # Disable Swift module-interface generation. Combined with the Runner
+      # bridging header it triggers: "Using bridging headers with module
+      # interfaces is unsupported".
+      config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'NO'
     end
   end
 end
