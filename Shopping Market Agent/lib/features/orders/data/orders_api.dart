@@ -8,10 +8,19 @@ class OrdersApi {
   OrdersApi();
   final _dio = DioClient.I.dio;
 
-  Future<List<OrderModel>> list({String? status, String? search}) async {
+  Future<List<OrderModel>> list({
+    String? status,
+    String? search,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
     final res = await _dio.get(ApiConstants.agentOrders, queryParameters: {
       if (status != null) 'status': status,
       if (search != null && search.isNotEmpty) 'search': search,
+      // Send as UTC ISO so the server compares against the aware created_at
+      // regardless of device/server timezone.
+      if (dateFrom != null) 'date_from': dateFrom.toUtc().toIso8601String(),
+      if (dateTo != null) 'date_to': dateTo.toUtc().toIso8601String(),
     });
     return ApiEnvelope.unwrapList<OrderModel>(
       res.data, (o) => OrderModel.fromJson(Map<String, dynamic>.from(o)),

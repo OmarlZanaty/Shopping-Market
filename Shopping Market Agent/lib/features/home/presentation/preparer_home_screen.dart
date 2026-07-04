@@ -10,6 +10,7 @@ import '../../../core/widgets/order_card.dart';
 import '../../auth/auth_controller.dart';
 import '../../orders/data/order_models.dart';
 import '../../orders/data/orders_providers.dart';
+import '../../orders/presentation/order_time_filter_bar.dart';
 
 class PreparerHomeScreen extends ConsumerStatefulWidget {
   const PreparerHomeScreen({super.key});
@@ -123,13 +124,20 @@ class _PreparerHomeScreenState extends ConsumerState<PreparerHomeScreen>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tab,
-        children: const [
-          _AllOrdersTab(),                                           // search + all
-          _OrderList(statusGroup: 'new'),
-          _OrderList(statusGroup: 'accepted,preparing,out_for_delivery'),
-          _OrderList(statusGroup: 'delivered'),
+      body: Column(
+        children: [
+          const OrderTimeFilterBar(),
+          Expanded(
+            child: TabBarView(
+              controller: _tab,
+              children: const [
+                _AllOrdersTab(),                                     // search + all
+                _OrderList(statusGroup: 'new'),
+                _OrderList(statusGroup: 'accepted,preparing,out_for_delivery'),
+                _OrderList(statusGroup: 'delivered'),
+              ],
+            ),
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

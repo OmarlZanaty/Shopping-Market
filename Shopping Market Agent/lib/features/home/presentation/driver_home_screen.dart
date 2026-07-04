@@ -8,6 +8,7 @@ import '../../../core/widgets/order_card.dart';
 import '../../auth/auth_controller.dart';
 import '../../orders/data/order_models.dart';
 import '../../orders/data/orders_providers.dart';
+import '../../orders/presentation/order_time_filter_bar.dart';
 
 class DriverHomeScreen extends ConsumerStatefulWidget {
   const DriverHomeScreen({super.key});
@@ -118,15 +119,22 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tab,
-        children: const [
-          // New orders the driver can accept
-          _OrderList(statusGroup: 'new'),
-          // Orders ready to deliver or currently being delivered
-          _OrderList(statusGroup: 'out_for_delivery'),
-          // Completed deliveries
-          _OrderList(statusGroup: 'delivered'),
+      body: Column(
+        children: [
+          const OrderTimeFilterBar(),
+          Expanded(
+            child: TabBarView(
+              controller: _tab,
+              children: const [
+                // New orders the driver can accept
+                _OrderList(statusGroup: 'new'),
+                // Orders ready to deliver or currently being delivered
+                _OrderList(statusGroup: 'out_for_delivery'),
+                // Completed deliveries
+                _OrderList(statusGroup: 'delivered'),
+              ],
+            ),
+          ),
         ],
       ),
     );

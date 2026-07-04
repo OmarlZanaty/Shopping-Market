@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'order_models.dart';
+import 'order_time_filter.dart';
 import 'orders_api.dart';
 
 final ordersApiProvider = Provider<OrdersApi>((_) => OrdersApi());
@@ -27,7 +28,13 @@ void _scheduleAutoRefresh(Ref ref) {
 final ordersListProvider =
     FutureProvider.autoDispose.family<List<OrderModel>, String?>((ref, status) async {
   _scheduleAutoRefresh(ref);
-  return ref.read(ordersApiProvider).list(status: status);
+  // Watch the global time filter so changing it re-fetches every order list.
+  final range = ref.watch(orderTimeFilterProvider).resolve();
+  return ref.read(ordersApiProvider).list(
+        status: status,
+        dateFrom: range.from,
+        dateTo: range.to,
+      );
 });
 
 final orderDetailProvider =
@@ -43,5 +50,10 @@ final orderSearchProvider =
     FutureProvider.autoDispose.family<List<OrderModel>, String>((ref, query) async {
   final q = query.trim();
   if (q.isEmpty) return const [];
-  return ref.read(ordersApiProvider).list(search: q);
+  final range = ref.watch(orderTimeFilterProvider).resolve();
+  return ref.read(ordersApiProvider).list(
+        search: q,
+        dateFrom: range.from,
+        dateTo: range.to,
+      );
 });

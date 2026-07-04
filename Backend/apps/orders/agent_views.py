@@ -100,7 +100,34 @@ class AgentOrderListView(generics.ListAPIView):
                   or self.request.query_params.get('q') or '').strip()
         if search:
             qs = qs.filter(order_number__icontains=search)
+
+        # Time-range filter on created_at. The client sends UTC ISO datetimes
+        # (date_from inclusive, date_to exclusive). Plain YYYY-MM-DD is also
+        # accepted and treated as midnight in the server timezone.
+        date_from = self.request.query_params.get('date_from')
+        date_to = self.request.query_params.get('date_to')
+        parsed_from = self._parse_dt(date_from)
+        parsed_to = self._parse_dt(date_to)
+        if parsed_from:
+            qs = qs.filter(created_at__gte=parsed_from)
+        if parsed_to:
+            qs = qs.filter(created_at__lt=parsed_to)
         return qs.distinct().order_by('-created_at')
+
+    @staticmethod
+    def _parse_dt(value):
+        """Parse an ISO datetime (or plain date) into an aware datetime, or None."""
+        if not value:
+            return None
+        from django.utils.dateparse import parse_datetime, parse_date
+        dt = parse_datetime(value)
+        if dt is None:
+            d = parse_date(value)
+            if d is not None:
+                dt = timezone.datetime(d.year, d.month, d.day)
+        if dt is not None and timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+        return dt
 
 
 class AgentOrderDetailView(APIView):
