@@ -24,7 +24,13 @@ workflows:
       cocoapods: default
     scripts:
       - name: Get Flutter packages
-        script: flutter pub get
+        script: |
+          # Disable Flutter's Swift Package Manager integration. These plugins
+          # are CocoaPods-only, and SPM's module interfaces clash with the app's
+          # bridging header ("Using bridging headers with module interfaces is
+          # unsupported"). CocoaPods handles everything.
+          flutter config --no-enable-swift-package-manager
+          flutter pub get
       - name: Install CocoaPods dependencies
         script: find . -name "Podfile" -execdir pod install \;
       - name: Set up code signing (create cert + profile)
