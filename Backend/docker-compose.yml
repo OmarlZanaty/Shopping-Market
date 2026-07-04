@@ -104,7 +104,7 @@ services:
       context: ../Admin Dashboard
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: http://34.124.228.3/api/v1
+        VITE_API_BASE_URL: http://63.186.157.245/api/v1
     container_name: shoppingmarket-admin
     restart: always
     depends_on:

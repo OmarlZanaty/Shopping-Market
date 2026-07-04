@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://34.124.228.3/api/v1';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://63.186.157.245/api/v1';
 
 // NOTE: do NOT force a global 'Content-Type: application/json'. Axios already
 // sets application/json for plain-object bodies and multipart/form-data (with

@@ -3,6 +3,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { productApi } from '../../services/api';
 import toast from 'react-hot-toast';
 
+// Backend wraps payloads in an ok() envelope: { success, data, message, errors }.
+// Older responses may be raw — unwrap defensively (same pattern as authStore).
+const unwrap = (res) =>
+  res?.data?.success !== undefined ? res.data.data : res?.data;
+
 /**
  * Excel/CSV product import modal.
  * Flow: pick file → automatic dry-run preview (new/updated/errors) → confirm import.
@@ -21,7 +26,7 @@ export default function ImportProductsModal({ lang, onClose }) {
 
   const { data: history } = useQuery({
     queryKey: ['product-import-history'],
-    queryFn: () => productApi.importHistory().then(r => r.data),
+    queryFn: () => productApi.importHistory().then(unwrap),
     enabled: tab === 'history',
   });
 
@@ -49,7 +54,7 @@ export default function ImportProductsModal({ lang, onClose }) {
     setResult(null);
     try {
       const res = await productApi.import(f, { dryRun: true });
-      setPreview(res.data);
+      setPreview(unwrap(res));
     } catch (e) {
       toast.error(e?.message || t('فشل قراءة الملف', 'Could not read the file'));
       setFile(null);
@@ -70,7 +75,7 @@ export default function ImportProductsModal({ lang, onClose }) {
     setBusy(true);
     try {
       const res = await productApi.import(file, { dryRun: false });
-      setResult(res.data);
+      setResult(unwrap(res));
       setPreview(null);
       qc.invalidateQueries(['admin-products']);
       qc.invalidateQueries(['product-import-history']);

@@ -53,7 +53,7 @@ export default function Layout() {
   // Admin WebSocket — new-order push + toast.
   useEffect(() => {
     if (!token) return;
-    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://34.124.228.3/api/v1';
+    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://63.186.157.245/api/v1';
     const wsBase = apiBase
       .replace('/api/v1', '')
       .replace('http://', 'ws://')

@@ -4,7 +4,7 @@ COPY package*.json ./
 RUN npm install
 COPY . .
 # Injected at build time so Vite can bake the correct API URL into the bundle
-ARG VITE_API_BASE_URL=http://34.124.228.3/api/v1
+ARG VITE_API_BASE_URL=http://63.186.157.245/api/v1
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
