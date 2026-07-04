@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import generics, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -9,6 +11,23 @@ from .models import AppSettings, InAppNotification
 from apps.users.permissions import IsAdminUser
 from apps.core.responses import ok, fail
 from apps.core.cache_keys import APP_SETTINGS_CACHE_KEY, APP_SETTINGS_CACHE_TTL
+
+
+def _apply_setting_side_effects(key, value):
+    """Mirror settings whose runtime source of truth lives on another model.
+
+    `delivery_radius_km` is edited in the Settings screen but the delivery
+    limit the app actually enforces is Branch.delivery_radius_km. Treat the
+    setting as the single global control and push it onto every branch so the
+    edit takes effect (single-store setup; multistore is off).
+    """
+    if key == 'delivery_radius_km':
+        try:
+            radius = Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return
+        from apps.branches.models import Branch
+        Branch.objects.all().update(delivery_radius_km=radius)
 
 
 class AppSettingsSerializer(serializers.ModelSerializer):
@@ -42,7 +61,8 @@ class AdminAppSettingsView(generics.ListCreateAPIView):
     queryset = AppSettings.objects.all().order_by('key')
 
     def perform_create(self, serializer):
-        serializer.save()
+        obj = serializer.save()
+        _apply_setting_side_effects(obj.key, obj.value)
         cache.delete(APP_SETTINGS_CACHE_KEY)
 
 
@@ -52,7 +72,8 @@ class AdminAppSettingDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = AppSettings.objects.all()
 
     def perform_update(self, serializer):
-        serializer.save()
+        obj = serializer.save()
+        _apply_setting_side_effects(obj.key, obj.value)
         cache.delete(APP_SETTINGS_CACHE_KEY)
 
 
@@ -76,6 +97,7 @@ class AdminAppSettingsBulkView(APIView):
             if 'description' in it:
                 defaults['description'] = it.get('description', '')
             AppSettings.objects.update_or_create(key=key, defaults=defaults)
+            _apply_setting_side_effects(key, value)
             updated += 1
         cache.delete(APP_SETTINGS_CACHE_KEY)
         return ok({'updated': updated})
