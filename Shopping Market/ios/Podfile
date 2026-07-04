@@ -1,7 +1,7 @@
 # Global iOS platform. Must be >= the highest minimum required by any plugin
-# (awesome_notifications requires iOS 13.0). Matches the Runner deployment
+# (awesome_notifications 0.11 requires iOS 15.0). Matches the Runner deployment
 # target set in project.pbxproj / AppFrameworkInfo.plist.
-platform :ios, '13.0'
+platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -40,8 +40,8 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
-      # Force every pod to iOS 13.0 so plugins like awesome_notifications build.
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+      # Force every pod to iOS 15.0 so plugins like awesome_notifications build.
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
     end
   end
 end
