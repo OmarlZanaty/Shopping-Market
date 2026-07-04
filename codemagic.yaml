@@ -17,7 +17,10 @@ workflows:
       vars:
         BUNDLE_ID: "com.almobarmg.shoppingmarket"
       flutter: stable
-      xcode: latest
+      # Pin Xcode to a stable release. `latest` (Xcode 26 / Swift 6 toolchain)
+      # fails with "Using bridging headers with module interfaces is unsupported".
+      # 16.4 still ships the iOS 18 SDK required for App Store submission.
+      xcode: 16.4
       cocoapods: default
     scripts:
       - name: Get Flutter packages
