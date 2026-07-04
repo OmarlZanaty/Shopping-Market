@@ -8,9 +8,10 @@ class OrdersApi {
   OrdersApi();
   final _dio = DioClient.I.dio;
 
-  Future<List<OrderModel>> list({String? status}) async {
+  Future<List<OrderModel>> list({String? status, String? search}) async {
     final res = await _dio.get(ApiConstants.agentOrders, queryParameters: {
       if (status != null) 'status': status,
+      if (search != null && search.isNotEmpty) 'search': search,
     });
     return ApiEnvelope.unwrapList<OrderModel>(
       res.data, (o) => OrderModel.fromJson(Map<String, dynamic>.from(o)),

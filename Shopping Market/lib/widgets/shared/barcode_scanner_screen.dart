@@ -20,6 +20,39 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     super.dispose();
   }
 
+  void _onDetect(BarcodeCapture capture) async {
+    if (_scanned) return;
+
+    // Try rawValue first, fall back to displayValue; always trim whitespace.
+    final raw = capture.barcodes.first.rawValue?.trim() ??
+        capture.barcodes.first.displayValue?.trim();
+    if (raw == null || raw.isEmpty) return;
+
+    _scanned = true;
+
+    // Look up the product by barcode.
+    final product = await _api.getProductByBarcode(raw);
+
+    if (!mounted) return;
+
+    if (product != null) {
+      // Return the raw barcode string so the caller can do its own lookup
+      // (avoids passing a UUID back as a "barcode").
+      Navigator.pop(context, raw);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('المنتج غير موجود في النظام',
+              style: TextStyle(fontFamily: 'Cairo')),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      // Reset so the user can try scanning another barcode.
+      setState(() => _scanned = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -36,29 +69,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
       body: Stack(children: [
         MobileScanner(
           controller: _controller,
-          onDetect: (capture) async {
-            if (_scanned) return;
-            final barcode = capture.barcodes.first.rawValue;
-            if (barcode == null) return;
-            _scanned = true;
-            try {
-              final product = await _api.getProductByBarcode(barcode);
-              if (product != null && mounted) {
-                Navigator.pop(context, product.id);
-              }
-            } catch (_) {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('المنتج غير موجود في النظام',
-                        style: TextStyle(fontFamily: 'Cairo')),
-                    backgroundColor: AppColors.error,
-                  ),
-                );
-                setState(() => _scanned = false);
-              }
-            }
-          },
+          onDetect: _onDetect,
         ),
         // Scan overlay
         Center(

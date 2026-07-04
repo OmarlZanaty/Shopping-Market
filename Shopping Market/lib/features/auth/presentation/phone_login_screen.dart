@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_dimensions.dart';
 import '../../../core/utils/validators.dart';
+import '../../../models/models.dart';
+import '../../../providers/auth_provider.dart';
 import '../../../services/api_service.dart';
 
-/// Customer phone login. Egyptian phone with +20 prefix. Validates the spec
-/// regex inline. Submits OTP request and navigates to the OTP screen.
+/// Customer phone login — uses Firebase Phone Auth to send OTP.
+/// The phone number is formatted as +20XXXXXXXXXX before being sent.
 class PhoneLoginScreen extends StatefulWidget {
   const PhoneLoginScreen({super.key});
 
@@ -41,23 +46,83 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
 
-    final phone = _phoneController.text.trim();
+    final localNumber = _phoneController.text.trim();
+    // Firebase expects E.164 format: +20XXXXXXXXXX
+    // Egyptian numbers: 01XXXXXXXXX → strip leading 0 → +201XXXXXXXXX
+    final e164 = '+2$localNumber';
+
+    await FirebaseAuth.instance.verifyPhoneNumber(
+      phoneNumber: e164,
+      timeout: const Duration(seconds: 60),
+      verificationCompleted: (PhoneAuthCredential credential) async {
+        // Android auto-retrieval — sign in immediately without user input.
+        await _signInWithCredential(credential, localNumber);
+      },
+      verificationFailed: (FirebaseAuthException e) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        // ignore: avoid_print — temporary until the real Play Integrity/billing
+        // cause is confirmed; e.code alone ("unknown") hides the actual reason.
+        print('verifyPhoneNumber failed — code: ${e.code}, plugin: ${e.plugin}, message: ${e.message}');
+        final msg = _friendlyError(e.code);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$msg\n${e.message ?? ""}'),
+          backgroundColor: AppColors.errorRed,
+        ));
+      },
+      codeSent: (String verificationId, int? resendToken) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        context.push('/otp', extra: {
+          'phone': localNumber,
+          'verificationId': verificationId,
+          'resendToken': resendToken,
+        });
+      },
+      codeAutoRetrievalTimeout: (String verificationId) {},
+    );
+  }
+
+  /// Android auto-retrieval path: Firebase reads the SMS itself and hands us a
+  /// credential without the user typing it. This must complete the SAME full
+  /// login as the OTP screen — sign in to Firebase, exchange the ID token for
+  /// our backend JWT, and mark the session authenticated — otherwise the router
+  /// sees an unauthenticated user on /home and bounces back to /login.
+  Future<void> _signInWithCredential(
+      PhoneAuthCredential credential, String phone) async {
     try {
-      final res = await ApiService().sendOtp(phone);
+      final result =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+      final idToken = await result.user?.getIdToken();
+      if (idToken == null) throw Exception('Firebase token missing');
+
+      final res =
+          await ApiService().firebaseTokenLogin(idToken: idToken, phone: phone);
+      final UserModel user = res['user'] is Map
+          ? UserModel.fromJson(Map<String, dynamic>.from(res['user']))
+          : await ApiService().getProfile();
+
       if (!mounted) return;
-      // Pass debug_code (DEBUG mode only) so the dev can complete the flow.
-      context.push('/otp', extra: {
-        'phone': phone,
-        'debug_code': res['debug_code'],
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('فشل الإرسال: ${e.toString()}'),
-        backgroundColor: AppColors.errorRed,
-      ));
-    } finally {
+      await context.read<AuthProvider>().setAuthenticated(user);
+      final isNew = res['is_new_user'] == true;
+      context.go(isNew ? '/profile-complete' : '/home');
+    } catch (_) {
+      // Auto-retrieval failed silently — leave the user on the OTP screen so
+      // they can enter the code manually instead of getting bounced.
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  String _friendlyError(String code) {
+    switch (code) {
+      case 'invalid-phone-number':
+        return 'رقم الهاتف غير صحيح';
+      case 'too-many-requests':
+        return 'تم تجاوز الحد المسموح — حاول لاحقاً';
+      case 'quota-exceeded':
+        return 'تم تجاوز حصة الرسائل اليوم';
+      default:
+        return 'فشل الإرسال ($code)';
     }
   }
 
@@ -90,19 +155,15 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                   ),
                   textAlign: TextAlign.right,
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  'سنرسل لك رمز تحقق برسالة نصية',
-                  style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
-                  textAlign: TextAlign.right,
-                ),
                 const SizedBox(height: 28),
                 _buildPhoneField(),
-                if (_phoneError != null && _phoneController.text.isNotEmpty) ...[
+                if (_phoneError != null &&
+                    _phoneController.text.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
                     _phoneError!,
-                    style: const TextStyle(color: AppColors.errorRed, fontSize: 12),
+                    style:
+                        const TextStyle(color: AppColors.errorRed, fontSize: 12),
                     textAlign: TextAlign.right,
                   ),
                 ],
@@ -111,10 +172,10 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                   onPressed: (_isValid && !_isLoading) ? _submit : null,
                   child: _isLoading
                       ? const SizedBox(
-                          height: 22, width: 22,
+                          height: 22,
+                          width: 22,
                           child: CircularProgressIndicator(
-                            color: AppColors.textPrimary, strokeWidth: 2,
-                          ),
+                            color: AppColors.textPrimary, strokeWidth: 2),
                         )
                       : const Text('متابعة'),
                 ),
@@ -123,21 +184,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 const SizedBox(height: 16),
                 _socialButton(
                   label: 'الدخول بحساب Google',
-                  iconAsset: 'assets/images/google.png',
                   onTap: _googleSignIn,
-                ),
-                const SizedBox(height: 12),
-                _socialButton(
-                  label: 'الدخول بحساب Facebook',
-                  iconAsset: 'assets/images/facebook.png',
-                  onTap: _facebookSignIn,
-                ),
-                const Spacer(),
-                Center(
-                  child: TextButton(
-                    onPressed: () => context.go('/home'),
-                    child: const Text('تصفح بدون تسجيل'),
-                  ),
                 ),
               ],
             ),
@@ -161,16 +208,18 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       child: Row(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
             child: Row(
               children: const [
                 Text('🇪🇬', style: TextStyle(fontSize: 18)),
                 SizedBox(width: 6),
-                Text('+20', style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 16,
-                  fontFamily: 'Inter',
-                )),
+                Text('+20',
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 16,
+                      fontFamily: 'Inter',
+                    )),
               ],
             ),
           ),
@@ -182,16 +231,14 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
               maxLength: 11,
               textAlign: TextAlign.left,
               textDirection: TextDirection.ltr,
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-              ],
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               style: const TextStyle(
                 color: AppColors.textPrimary,
                 fontFamily: 'Inter',
                 fontSize: 16,
               ),
               decoration: const InputDecoration(
-                hintText: '1xxxxxxxxx',
+                hintText: '01xxxxxxxxx',
                 counterText: '',
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
@@ -212,17 +259,14 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
           Expanded(child: Divider(color: AppColors.appBarDivider)),
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 12),
-            child: Text('أو', style: TextStyle(color: AppColors.textSecondary)),
+            child:
+                Text('أو', style: TextStyle(color: AppColors.textSecondary)),
           ),
           Expanded(child: Divider(color: AppColors.appBarDivider)),
         ],
       );
 
-  Widget _socialButton({
-    required String label,
-    required String iconAsset,
-    required VoidCallback onTap,
-  }) =>
+  Widget _socialButton({required String label, required VoidCallback onTap}) =>
       OutlinedButton(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.textPrimary,
@@ -230,25 +274,148 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
           padding: const EdgeInsets.symmetric(vertical: 14),
         ),
         onPressed: onTap,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-          ],
-        ),
+        child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
       );
 
   Future<void> _googleSignIn() async {
-    // Wired in feature/auth — uses google_sign_in package. Stubbed here so
-    // the screen is fully functional even if the package isn't configured.
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Google Sign-In — قيد التطوير'),
-    ));
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+    try {
+      final googleSignIn = GoogleSignIn(scopes: const ['email']);
+      // Sign out first so the account picker always appears (avoids silently
+      // reusing a previously-selected account).
+      await googleSignIn.signOut();
+      final account = await googleSignIn.signIn();
+      if (account == null) {
+        // User cancelled the picker.
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+      await _completeSocialLogin(
+        provider: 'google',
+        socialId: account.id,
+        email: account.email,
+        fullName: account.displayName,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('تعذّر تسجيل الدخول عبر Google'),
+        backgroundColor: AppColors.errorRed,
+      ));
+    }
   }
 
-  Future<void> _facebookSignIn() async {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Facebook Sign-In — قيد التطوير'),
-    ));
+  /// Sends the provider profile to the backend. New social users must supply a
+  /// phone number, so on the backend's "phone required" response we prompt for
+  /// one and retry. On success we route to the home screen.
+  Future<void> _completeSocialLogin({
+    required String provider,
+    required String socialId,
+    String? email,
+    String? fullName,
+    String? phone,
+  }) async {
+    final auth = context.read<AuthProvider>();
+    final result = await auth.handleSocialLogin(
+      provider: provider,
+      socialId: socialId,
+      email: email,
+      fullName: fullName,
+      phone: phone,
+    );
+    if (!mounted) return;
+
+    switch (result) {
+      case SocialLoginResult.success:
+        context.go('/home');
+        return;
+      case SocialLoginResult.needsPhone:
+        // New user — backend needs a phone number before creating the account.
+        final entered = await _askForPhone();
+        if (!mounted) return;
+        if (entered == null) {
+          setState(() => _isLoading = false);
+          return;
+        }
+        await _completeSocialLogin(
+          provider: provider,
+          socialId: socialId,
+          email: email,
+          fullName: fullName,
+          phone: entered,
+        );
+        return;
+      case SocialLoginResult.failed:
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(auth.error ?? 'فشل تسجيل الدخول'),
+          backgroundColor: AppColors.errorRed,
+        ));
+        return;
+    }
+  }
+
+  /// Bottom-sheet prompting a new social user for their Egyptian phone number.
+  /// Returns the local number (e.g. 01xxxxxxxxx) or null if cancelled.
+  Future<String?> _askForPhone() {
+    final ctrl = TextEditingController();
+    String? err;
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(
+              20, 20, 20, MediaQuery.of(sheetCtx).viewInsets.bottom + 20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('أدخل رقم هاتفك لإكمال التسجيل',
+                style: TextStyle(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: ctrl,
+              keyboardType: TextInputType.phone,
+              maxLength: 11,
+              autofocus: true,
+              textDirection: TextDirection.ltr,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                prefixText: '+20  ',
+                prefixStyle: const TextStyle(color: AppColors.textSecondary),
+                hintText: '01xxxxxxxxx',
+                counterText: '',
+                errorText: err,
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: () {
+                  final v = ctrl.text.trim();
+                  final e = Validators.egyptianPhone(v);
+                  if (e != null) {
+                    setSheet(() => err = e);
+                    return;
+                  }
+                  Navigator.pop(sheetCtx, v);
+                },
+                child: const Text('متابعة'),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 }

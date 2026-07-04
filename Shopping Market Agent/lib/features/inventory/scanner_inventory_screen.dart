@@ -173,25 +173,43 @@ class _ScannerInventoryScreenState
     _showScannedProduct(barcode);
   }
 
-  void _showScannedProduct(String barcode) {
-    showModalBottomSheet(
+  Future<void> _showScannedProduct(String barcode) async {
+    // Resolve the barcode, then open the full product screen so the agent can
+    // edit everything (price, stock, availability, …) — not just toggle.
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.backgroundSecondary,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _ScannedProductSheet(
-        barcode: barcode,
-        onToggled: (pid, newVal) {
-          final idx = _products.indexWhere((p) => p['id'].toString() == pid);
-          if (idx != -1) {
-            setState(() =>
-                _products[idx] = {..._products[idx], 'is_available': newVal});
-          }
-        },
-      ),
+      barrierDismissible: false,
+      builder: (_) => const Center(
+          child: CircularProgressIndicator(color: AppColors.accentOrange)),
     );
+    Map<String, dynamic> product;
+    try {
+      product = await OrdersApi().inventoryScan(barcode);
+    } catch (_) {
+      product = {};
+    }
+    if (!mounted) return;
+    Navigator.of(context).pop(); // close the loader
+
+    if (product['id'] == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('لم يُعثر على منتج بالباركود: $barcode'),
+        backgroundColor: AppColors.errorRed,
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+
+    final updated = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
+    );
+    if (updated != null && mounted) {
+      final idx = _products
+          .indexWhere((p) => p['id'].toString() == updated['id'].toString());
+      if (idx != -1) {
+        setState(() => _products[idx] = {..._products[idx], ...updated});
+      }
+    }
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -412,7 +430,7 @@ class _ProductGridCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isAvailable = product['is_available'] == true;
     final isActive = product['is_active'] != false; // default true if missing
-    final price = (product['current_price'] as num?)?.toDouble() ?? 0.0;
+    final price = num.tryParse('${product['current_price'] ?? 0}')?.toDouble() ?? 0.0;
     final name = (product['name_ar'] ?? product['name_en'] ?? '—') as String;
     final imageUrl = (product['image_url'] ?? '') as String;
 
@@ -504,6 +522,20 @@ class _ProductGridCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if ((product['barcode'] ?? '').toString().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          product['barcode'].toString(),
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 10,
+                            fontFamily: 'Inter',
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     const Spacer(),
                     if (price > 0)
                       Text(
@@ -691,8 +723,13 @@ class _ProductSheetDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isAvailable = product['is_available'] == true;
-    final stockQty = (product['quantity_in_stock'] as num?)?.toInt() ?? 0;
-    final price = (product['current_price'] as num?)?.toDouble() ?? 0.0;
+    // Values may arrive as String ("218.95") or num depending on the endpoint
+    // (scan vs list), and the stock key differs too. Parse defensively.
+    final stockQty = num.tryParse(
+            '${product['quantity_in_stock'] ?? product['stock_quantity'] ?? 0}')
+        ?.toInt() ?? 0;
+    final price = num.tryParse('${product['current_price'] ?? 0}')
+        ?.toDouble() ?? 0.0;
 
     return Column(mainAxisSize: MainAxisSize.min, children: [
       Container(

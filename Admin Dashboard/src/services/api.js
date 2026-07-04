@@ -148,6 +148,8 @@ export const notificationApi = {
   settings: () => api.get('/notifications/admin/settings/'),
   updateSetting: (id, data) => api.patch(`/notifications/admin/settings/${id}/`, data),
   createSetting: (data) => api.post('/notifications/admin/settings/', data),
+  // Bulk upsert by key — body: [{key, value}, ...]. Missing keys are created.
+  bulkSettings: (items) => api.patch('/notifications/admin/settings/bulk/', items),
   send: (data) => api.post('/notifications/admin/send/', data),
 };
 

@@ -163,16 +163,19 @@ def create_customer_order(customer, payload):
                 # usage row attached after we know the total
 
     # Apply points
+    from .loyalty import clamp_redeemable_points, value_for_points, is_enabled
     points_used = int(payload.get('points_to_use', 0) or 0)
     points_value = Decimal('0')
     if points_used > 0:
+        if not is_enabled():
+            raise OrderError('Loyalty redemption is currently disabled')
         if customer.loyalty_points < points_used:
             raise OrderError('Not enough loyalty points')
-        try:
-            point_val = Decimal(str(AppSettings.get('loyalty_redeem_rate', '0.05') or '0.05'))
-        except Exception:
-            point_val = Decimal('0.05')
-        points_value = Decimal(points_used) * point_val
+        # Enforce admin min/max-percent rules, then price the discount.
+        points_used = clamp_redeemable_points(points_used, subtotal)
+        if points_used <= 0:
+            raise OrderError('Points redemption below the minimum or not allowed')
+        points_value = value_for_points(points_used)
         customer.loyalty_points -= points_used
         customer.save(update_fields=['loyalty_points'])
         PointsTransaction.objects.create(

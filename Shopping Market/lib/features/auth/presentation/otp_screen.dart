@@ -1,29 +1,39 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
+
+import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_dimensions.dart';
-import '../../../core/storage/secure_storage_keys.dart';
+import '../../../providers/auth_provider.dart' as app_auth;
 import '../../../services/api_service.dart';
 import '../../../models/models.dart';
 
-/// 6-box OTP entry. Auto-submits on the 6th digit. 60-second resend lockout.
-/// Shake + red border on wrong code.
+/// 6-box OTP entry — verifies via Firebase, then exchanges Firebase ID token
+/// for our Django JWT at POST /auth/firebase-token/.
 class OtpScreen extends StatefulWidget {
   final String phone;
-  final String? debugCode;
+  final String verificationId;
+  final int? resendToken;
 
-  const OtpScreen({super.key, required this.phone, this.debugCode});
+  const OtpScreen({
+    super.key,
+    required this.phone,
+    required this.verificationId,
+    this.resendToken,
+  });
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
 }
 
-class _OtpScreenState extends State<OtpScreen> with SingleTickerProviderStateMixin {
+class _OtpScreenState extends State<OtpScreen>
+    with SingleTickerProviderStateMixin {
   static const int _otpLength = 6;
   static const int _resendCooldownSec = 60;
 
@@ -37,30 +47,25 @@ class _OtpScreenState extends State<OtpScreen> with SingleTickerProviderStateMix
 
   Timer? _resendTimer;
   int _resendIn = _resendCooldownSec;
-
   bool _isVerifying = false;
   bool _hasError = false;
+
+  // Mutable verificationId — updated after resend.
+  late String _verificationId;
+  int? _resendToken;
 
   @override
   void initState() {
     super.initState();
-    _shake = AnimationController(vsync: this, duration: const Duration(milliseconds: 350));
+    _verificationId = widget.verificationId;
+    _resendToken = widget.resendToken;
+    _shake = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 350));
     _shakeAnim = Tween<double>(begin: 0, end: 10)
         .chain(CurveTween(curve: Curves.elasticIn))
         .animate(_shake);
     _startResendCountdown();
-
-    // Auto-fill the debug code from the response, if running in dev.
-    final dbg = widget.debugCode;
-    if (dbg != null && dbg.length == _otpLength) {
-      for (var i = 0; i < _otpLength; i++) {
-        _ctrls[i].text = dbg[i];
-      }
-      // Slight delay so the UI renders before auto-submit.
-      WidgetsBinding.instance.addPostFrameCallback((_) => _verify());
-    } else {
-      _focus[0].requestFocus();
-    }
+    _focus[0].requestFocus();
   }
 
   @override
@@ -84,21 +89,35 @@ class _OtpScreenState extends State<OtpScreen> with SingleTickerProviderStateMix
 
   Future<void> _resend() async {
     if (_resendIn > 0) return;
-    try {
-      await ApiService().sendOtp(widget.phone);
-      _startResendCountdown();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('تم إرسال الكود مجدداً'),
-        backgroundColor: AppColors.successGreen,
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('فشل الإرسال: $e'),
-        backgroundColor: AppColors.errorRed,
-      ));
-    }
+    final e164 = '+2${widget.phone}';
+    await FirebaseAuth.instance.verifyPhoneNumber(
+      phoneNumber: e164,
+      forceResendingToken: _resendToken,
+      timeout: const Duration(seconds: 60),
+      verificationCompleted: (credential) async {
+        await _verifyCredential(credential);
+      },
+      verificationFailed: (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('فشل إعادة الإرسال: ${e.code}'),
+          backgroundColor: AppColors.errorRed,
+        ));
+      },
+      codeSent: (newVerificationId, newResendToken) {
+        if (!mounted) return;
+        setState(() {
+          _verificationId = newVerificationId;
+          _resendToken = newResendToken;
+        });
+        _startResendCountdown();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('تم إرسال الكود مجدداً'),
+          backgroundColor: AppColors.successGreen,
+        ));
+      },
+      codeAutoRetrievalTimeout: (_) {},
+    );
   }
 
   String get _code => _ctrls.map((c) => c.text).join();
@@ -114,28 +133,92 @@ class _OtpScreenState extends State<OtpScreen> with SingleTickerProviderStateMix
     });
     FocusScope.of(context).unfocus();
 
+    final credential = PhoneAuthProvider.credential(
+      verificationId: _verificationId,
+      smsCode: code,
+    );
+    await _verifyCredential(credential);
+  }
+
+  Future<void> _verifyCredential(PhoneAuthCredential credential) async {
     try {
-      final res = await ApiService().verifyOtp(widget.phone, code);
-      // Tokens were saved by ApiService. Persist user data.
-      if (res['user'] is Map) {
-        const storage = FlutterSecureStorage();
-        final user = UserModel.fromJson(Map<String, dynamic>.from(res['user']));
-        await storage.write(key: SecureStorageKeys.userData, value: user.toJson().toString());
-      }
+      // 1. Verify with Firebase
+      final result =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+      final idToken = await result.user?.getIdToken();
+      if (idToken == null) throw Exception('Firebase token missing');
+
+      // 2. Exchange Firebase ID token for our Django JWT
+      final res = await ApiService().firebaseTokenLogin(
+        idToken: idToken,
+        phone: widget.phone,
+      );
+
+      // 3. Persist user data + update AuthProvider so router unlocks.
+      // The /auth/firebase-token/ response only returns {access, refresh,
+      // is_new_user} — there is NO `user` object. The tokens are already
+      // saved inside firebaseTokenLogin(), so fetch the profile to populate
+      // AuthProvider. (Previously we threw 'Invalid user data' here, which
+      // blocked login from completing even though the tokens had persisted —
+      // the user kept landing back on the OTP screen.)
+      final UserModel user = res['user'] is Map
+          ? UserModel.fromJson(Map<String, dynamic>.from(res['user']))
+          : await ApiService().getProfile();
+
       if (!mounted) return;
+      // setAuthenticated is now async (persists to storage) — await it so
+      // the user data is saved before we navigate.
+      await context.read<app_auth.AuthProvider>().setAuthenticated(user);
+
       final isNew = res['is_new_user'] == true;
       context.go(isNew ? '/profile-complete' : '/home');
-    } catch (e) {
+    } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      setState(() => _hasError = true);
+      setState(() {
+        _hasError = true;
+        _isVerifying = false;
+      });
       _shake.forward(from: 0).whenComplete(() => _shake.reverse());
+      final msg = e.code == 'invalid-verification-code'
+          ? 'الكود غير صحيح'
+          : 'خطأ في التحقق (${e.code})';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(e.toString().replaceFirst('ApiException: ', '')),
+        content: Text(msg),
         backgroundColor: AppColors.errorRed,
       ));
-    } finally {
-      if (mounted) setState(() => _isVerifying = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _hasError = true;
+        _isVerifying = false;
+      });
+      _shake.forward(from: 0).whenComplete(() => _shake.reverse());
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(_friendlyApiError(e)),
+        backgroundColor: AppColors.errorRed,
+      ));
     }
+  }
+
+  /// Turns a raw API/Dio error into a readable Arabic message. Surfaces the
+  /// server's reason for 403s (blocked / inactive account) instead of dumping
+  /// the raw DioException text.
+  String _friendlyApiError(Object e) {
+    if (e is DioException) {
+      final code = e.response?.statusCode;
+      final data = e.response?.data;
+      final serverMsg =
+          (data is Map ? data['message'] : null)?.toString() ?? '';
+      if (code == 403) {
+        if (serverMsg.toLowerCase().contains('block')) {
+          return 'تم حظر هذا الحساب. برجاء التواصل مع الدعم.';
+        }
+        return 'هذا الحساب غير مُفعّل. برجاء التواصل مع الدعم.';
+      }
+      if (serverMsg.isNotEmpty) return serverMsg;
+      return 'تعذّر تسجيل الدخول. حاول مرة أخرى.';
+    }
+    return e.toString().replaceFirst('Exception: ', '');
   }
 
   void _onChanged(int i, String value) {
@@ -169,9 +252,9 @@ class _OtpScreenState extends State<OtpScreen> with SingleTickerProviderStateMix
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 24),
-              Text(
+              const Text(
                 'أرسلنا كود التحقق إلى',
-                style: const TextStyle(fontSize: 16, color: AppColors.textPrimary),
+                style: TextStyle(fontSize: 16, color: AppColors.textPrimary),
                 textAlign: TextAlign.right,
               ),
               const SizedBox(height: 4),
@@ -205,7 +288,8 @@ class _OtpScreenState extends State<OtpScreen> with SingleTickerProviderStateMix
                   child: _resendIn > 0
                       ? Text(
                           'إعادة الإرسال خلال $_resendIn ثانية',
-                          style: const TextStyle(color: AppColors.textSecondary),
+                          style:
+                              const TextStyle(color: AppColors.textSecondary),
                         )
                       : TextButton(
                           onPressed: _resend,
@@ -230,7 +314,8 @@ class _OtpScreenState extends State<OtpScreen> with SingleTickerProviderStateMix
         textAlign: TextAlign.center,
         keyboardType: TextInputType.number,
         maxLength: 1,
-        textInputAction: i < _otpLength - 1 ? TextInputAction.next : TextInputAction.done,
+        textInputAction:
+            i < _otpLength - 1 ? TextInputAction.next : TextInputAction.done,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
         style: const TextStyle(
           fontSize: 22,
@@ -244,7 +329,8 @@ class _OtpScreenState extends State<OtpScreen> with SingleTickerProviderStateMix
           fillColor: AppColors.backgroundSecondary,
           contentPadding: EdgeInsets.zero,
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppDimensions.buttonRadius),
+            borderRadius:
+                BorderRadius.circular(AppDimensions.buttonRadius),
             borderSide: BorderSide(
               color: _hasError
                   ? AppColors.errorRed
@@ -253,8 +339,10 @@ class _OtpScreenState extends State<OtpScreen> with SingleTickerProviderStateMix
             ),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppDimensions.buttonRadius),
-            borderSide: const BorderSide(color: AppColors.accentOrange, width: 2),
+            borderRadius:
+                BorderRadius.circular(AppDimensions.buttonRadius),
+            borderSide:
+                const BorderSide(color: AppColors.accentOrange, width: 2),
           ),
         ),
         onChanged: (v) => _onChanged(i, v),

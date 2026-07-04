@@ -15,16 +15,36 @@ class CartProvider extends ChangeNotifier {
   AddressModel? get selectedAddress => _selectedAddress;
   String get paymentMethod => _paymentMethod;
   int get pointsToUse => _pointsToUse;
-  int get itemCount => _items.fold(0, (sum, i) => sum + i.quantity.toInt());
+  // Weight-based lines (e.g. 0.5 kg) count as a single item for the badge;
+  // piece lines count by their whole quantity.
+  int get itemCount => _items.fold(0, (sum, i) =>
+      sum + (i.product.isWeighed ? 1 : i.quantity.toInt()));
 
   double get subtotal => _items.fold(0, (sum, i) => sum + i.lineTotal);
   double get deliveryFee => 15.0;
   double get savings     => _items.fold(0, (sum, i) => sum + i.product.savings * i.quantity);
-  double get pointsValue => _pointsToUse * 0.05;
+  double get pointsValue => LoyaltyConfig.valueForPoints(_pointsToUse);
   double get total       => (subtotal + deliveryFee - pointsValue).clamp(0, double.infinity);
 
   bool get isEmpty => _items.isEmpty;
   bool get isNotEmpty => _items.isNotEmpty;
+
+  double getQuantity(String productId) {
+    final idx = _items.indexWhere((i) => i.product.id == productId);
+    return idx >= 0 ? _items[idx].quantity : 0;
+  }
+
+  void decrementItem(String productId) {
+    final idx = _items.indexWhere((i) => i.product.id == productId);
+    if (idx < 0) return;
+    if (_items[idx].quantity <= 1) {
+      _items.removeAt(idx);
+    } else {
+      _items[idx].quantity -= 1;
+    }
+    _persist();
+    notifyListeners();
+  }
 
   void addItem(ProductModel product, {double qty = 1}) {
     final idx = _items.indexWhere((i) => i.product.id == product.id);

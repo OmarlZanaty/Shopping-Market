@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/auth_provider.dart';
-import '../core/storage/secure_storage_keys.dart';
 
 import '../screens/auth/splash_screen.dart';
 import '../screens/auth/login_screen.dart';
@@ -25,16 +23,50 @@ import '../screens/customer/profile/points_screen.dart';
 import '../screens/shared/main_scaffold.dart';
 
 class CustomerRouter {
+  /// Global key so NotificationService can navigate without a BuildContext.
+  static final navigatorKey = GlobalKey<NavigatorState>();
+
+  // Public routes that don't require authentication
+  static const _publicPaths = {
+    '/splash', '/onboarding', '/login', '/login-password',
+    '/register', '/otp', '/biometric-setup', '/profile-complete',
+  };
+
+  // Routes a guest (browse-without-login) user may access.
+  // Everything else requires a real account.
+  static bool _guestAllowed(String path) =>
+      path == '/home' || path.startsWith('/product');
+
   static GoRouter router(AuthProvider auth) => GoRouter(
+    navigatorKey: navigatorKey,
     initialLocation: '/splash',
     refreshListenable: auth,
-    redirect: (context, state) async {
-      // First launch → onboarding (once).
-      if (state.uri.path == '/splash') {
-        final prefs = await SharedPreferences.getInstance();
-        final seen = prefs.getBool(SecureStorageKeys.onboardingSeen) ?? false;
-        if (!seen) return '/onboarding';
+    redirect: (context, state) {
+      final path = state.uri.path;
+
+      // ① Splash always handles its own navigation — never redirect from here.
+      if (path == '/splash') return null;
+
+      // ② If auth is still initialising stay put (avoid premature redirects).
+      if (auth.status == AuthStatus.unknown) return null;
+
+      // ③ Authenticated user trying to reach login/register → home.
+      if (auth.isAuthenticated && (path == '/login' || path == '/register')) {
+        return '/home';
       }
+
+      // ④ Guest user: allow browsing home + product pages; anything else
+      //    (cart, orders, profile) requires a real login.
+      if (auth.isGuest) {
+        if (_publicPaths.contains(path) || _guestAllowed(path)) return null;
+        return '/login';
+      }
+
+      // ⑤ Unauthenticated user on a protected route → login.
+      if (!auth.isAuthenticated && !_publicPaths.contains(path)) {
+        return '/login';
+      }
+
       return null;
     },
     routes: [
@@ -48,7 +80,8 @@ class CustomerRouter {
           final extra = (state.extra ?? const {}) as Map;
           return OtpScreen(
             phone: extra['phone'] as String? ?? '',
-            debugCode: extra['debug_code'] as String?,
+            verificationId: extra['verificationId'] as String? ?? '',
+            resendToken: extra['resendToken'] as int?,
           );
         },
       ),

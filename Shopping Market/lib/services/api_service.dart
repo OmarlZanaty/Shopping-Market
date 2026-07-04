@@ -4,6 +4,11 @@ import '../utils/constants.dart';
 import '../models/models.dart';
 import '../core/network/api_envelope.dart';
 
+/// Thrown by [ApiService.socialLogin] when the backend recognises a brand-new
+/// social account and needs a phone number to complete the signup. The UI
+/// catches this to prompt for the phone, then retries with it supplied.
+class SocialNeedsPhoneException implements Exception {}
+
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -230,6 +235,14 @@ class ApiService {
     return Map<String, dynamic>.from(data is Map ? data : {});
   }
 
+  /// Global app settings (delivery radius, store location, ...) as a flat
+  /// {key: value} map. Public endpoint — returns a raw dict, not enveloped.
+  Future<Map<String, dynamic>> getAppSettings() async {
+    final res = await _dio.get('/notifications/settings/');
+    final data = _unwrap(res.data);
+    return Map<String, dynamic>.from(data is Map ? data : {});
+  }
+
   /// Active stores list (only when multistore_enabled=1).
   Future<List<Map<String, dynamic>>> getStores() async {
     final res = await _dio.get('/stores/');
@@ -385,15 +398,31 @@ class ApiService {
 
   Future<Map<String, dynamic>> socialLogin(String provider, String socialId,
       {String? phone, String? fullName, String? email}) async {
-    final res = await _dio.post('/auth/social/', data: {
-      'provider': provider, 'social_id': socialId,
-      if (phone != null) 'phone': phone,
-      if (fullName != null) 'full_name': fullName,
-      if (email != null) 'email': email,
-    });
-    final m = Map<String, dynamic>.from(_unwrap(res.data) ?? res.data);
-    await _saveTokens(m['access'], m['refresh']);
-    return m;
+    try {
+      final res = await _dio.post('/auth/social/', data: {
+        'provider': provider, 'social_id': socialId,
+        if (phone != null) 'phone': phone,
+        if (fullName != null) 'full_name': fullName,
+        if (email != null) 'email': email,
+      });
+      final m = Map<String, dynamic>.from(_unwrap(res.data) ?? res.data);
+      await _saveTokens(m['access'], m['refresh']);
+      return m;
+    } on DioException catch (e) {
+      // A brand-new social account returns 400 "Phone required for new social
+      // signup". Surface that distinctly so the UI can collect a phone and retry
+      // (only when we didn't already send one).
+      final body = e.response?.data;
+      final msg = (body is Map && body['message'] != null)
+          ? body['message'].toString().toLowerCase()
+          : '';
+      if (phone == null &&
+          e.response?.statusCode == 400 &&
+          msg.contains('phone')) {
+        throw SocialNeedsPhoneException();
+      }
+      rethrow;
+    }
   }
 
   Future<Map<String, dynamic>> biometricLogin(String biometricToken) async {

@@ -77,6 +77,28 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (_) => AlertDialog(
+                  backgroundColor: AppColors.backgroundSecondary,
+                  title: const Text('تسجيل الخروج'),
+                  content: const Text('هل تريد تسجيل الخروج من التطبيق؟'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('إلغاء'),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.errorRed,
+                      ),
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('خروج'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm != true || !mounted) return;
               await AgentLocationService.I.stop();
               await ref.read(agentAuthControllerProvider.notifier).logout();
               if (mounted) context.go('/login');
@@ -90,8 +112,8 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
           labelColor: AppColors.accentOrange,
           unselectedLabelColor: AppColors.textSecondary,
           tabs: const [
-            Tab(text: 'في الانتظار'),
-            Tab(text: 'جاري التوصيل'),
+            Tab(text: 'جديد'),
+            Tab(text: 'للتوصيل'),
             Tab(text: 'مُسلَّم'),
           ],
         ),
@@ -99,8 +121,11 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
       body: TabBarView(
         controller: _tab,
         children: const [
-          _OrderList(statusGroup: 'ready'),
+          // New orders the driver can accept
+          _OrderList(statusGroup: 'new'),
+          // Orders ready to deliver or currently being delivered
           _OrderList(statusGroup: 'out_for_delivery'),
+          // Completed deliveries
           _OrderList(statusGroup: 'delivered'),
         ],
       ),
@@ -141,9 +166,14 @@ class _OrderList extends ConsumerWidget {
               return OrderCard(
                 orderNumber: o.orderNumber,
                 status: o.status,
-                itemCount: o.items.length,
+                itemCount: o.itemCount,
                 total: o.total,
                 customerArea: _district(o),
+                customerName: o.customerName,
+                customerPhone: o.customerPhone,
+                addressFull: o.addressFull,
+                paymentMethod: o.paymentMethod,
+                itemsPreview: o.itemsPreview,
                 createdAt: o.createdAt,
                 onTap: () => GoRouter.of(context).push('/order/${o.id}'),
               );

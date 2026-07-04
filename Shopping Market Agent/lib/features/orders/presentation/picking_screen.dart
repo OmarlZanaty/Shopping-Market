@@ -504,6 +504,10 @@ class _ItemRowState extends ConsumerState<_ItemRow> {
   Widget build(BuildContext context) {
     final it = widget.item;
     final changed = (_qty - it.requestedQty).abs() > 0.001;
+    // Price per unit (adjusted price if the agent changed it, else the base
+    // price) and the live line total that tracks the quantity stepper.
+    final unitPrice = it.effectivePrice;
+    final lineTotal = unitPrice * _qty;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
@@ -618,16 +622,56 @@ class _ItemRowState extends ConsumerState<_ItemRow> {
         const SizedBox(height: 8),
         Row(children: [
           Text(
-            '${it.requestedQty.toStringAsFixed(it.isWeightBased ? 2 : 0)} ${it.unitType}',
+            it.isWeighed
+                ? 'المطلوب: ${it.qtyLabel(it.requestedQty)}'
+                : '${it.requestedQty.toStringAsFixed(0)} قطعة',
             style: AppTypography.smallLabel,
+          ),
+          const SizedBox(width: 8),
+          // Unit price (per piece / per kg)
+          Text(
+            it.isWeighed
+                ? '× ${unitPrice.toStringAsFixed(2)} ج/كجم'
+                : '× ${unitPrice.toStringAsFixed(2)} ج',
+            style: AppTypography.smallLabel.copyWith(fontFamily: 'Inter'),
           ),
           const Spacer(),
           _Stepper(
             value: _qty,
-            step: it.isWeightBased ? 0.1 : 1.0,
+            step: it.isWeighed ? 0.1 : 1.0,
+            weighed: it.isWeighed,
             onChanged: _busy ? null : _setActualQty,
           ),
         ]),
+        const SizedBox(height: 8),
+        // Live line total — recomputes whenever the quantity changes.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppColors.accentGold.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('الإجمالي', style: AppTypography.smallLabel),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Text(
+                  '${lineTotal.toStringAsFixed(2)} ج',
+                  key: ValueKey(lineTotal),
+                  style: const TextStyle(
+                    color: AppColors.accentGold,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'Inter',
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ]),
     );
   }
@@ -816,6 +860,16 @@ class _SubstitutePickerState extends ConsumerState<_SubstitutePicker> {
 
   static const int _maxPicks = 3;
 
+  // Opens the camera scanner; on a successful scan, fills the search box with
+  // the barcode and runs the search so the agent can pick a substitute by scan.
+  Future<void> _scanBarcode() async {
+    final code = await context.push<String>('/scanner');
+    if (code == null || code.trim().isEmpty || !mounted) return;
+    final normalized = code.trim();
+    _ctrl.text = normalized;
+    _search(normalized);
+  }
+
   void _toggle(String id, String name) {
     if (_selected.containsKey(id)) {
       setState(() => _selected.remove(id));
@@ -858,10 +912,14 @@ class _SubstitutePickerState extends ConsumerState<_SubstitutePicker> {
             controller: _ctrl,
             onChanged: _search,
             autofocus: true,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: 'بحث باسم المنتج أو الباركود',
-              prefixIcon:
-                  Icon(Icons.search, color: AppColors.textSecondary),
+              prefixIcon: const Icon(Icons.search, color: AppColors.textSecondary),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.qr_code_scanner, color: AppColors.accentOrange),
+                tooltip: 'مسح الباركود',
+                onPressed: _scanBarcode,
+              ),
             ),
           ),
           if (count > 0) ...[
@@ -921,6 +979,11 @@ class _SubstitutePickerState extends ConsumerState<_SubstitutePicker> {
                                       p['image'] ??
                                       '')
                                   .toString();
+                              // Weight-based substitutes are priced per kg.
+                              final unit = (p['unit_type'] ?? p['sell_unit'] ?? '')
+                                  .toString();
+                              final subWeighed = p['is_weight_based'] == true ||
+                                  unit == 'kg' || unit == 'gram' || unit == 'liter';
                               final checked = _selected.containsKey(id);
                               return ListTile(
                                 contentPadding: EdgeInsets.zero,
@@ -946,7 +1009,7 @@ class _SubstitutePickerState extends ConsumerState<_SubstitutePicker> {
                                 title: Text(nameAr,
                                     style: AppTypography.body),
                                 subtitle: price.isNotEmpty
-                                    ? Text('$price ج',
+                                    ? Text(subWeighed ? '$price ج/كجم' : '$price ج',
                                         style: AppTypography.smallLabel)
                                     : null,
                                 trailing: Checkbox(
@@ -1043,9 +1106,21 @@ class _StatusIcon extends StatelessWidget {
 class _Stepper extends StatelessWidget {
   final double value;
   final double step;
+  final bool weighed;
   final ValueChanged<double>? onChanged;
   const _Stepper(
-      {required this.value, required this.step, required this.onChanged});
+      {required this.value, required this.step, required this.onChanged,
+       this.weighed = false});
+
+  // Weighed values render as grams (< 1 kg) or kg; piece values as a count.
+  String get _label {
+    if (!weighed) return value.toStringAsFixed(0);
+    if (value < 1) return '${(value * 1000).round()} جم';
+    final s = value == value.roundToDouble()
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+    return '$s كجم';
+  }
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -1063,10 +1138,10 @@ class _Stepper extends StatelessWidget {
           padding: EdgeInsets.zero,
         ),
         Container(
-          width: 44,
+          width: weighed ? 64 : 44,
           alignment: Alignment.center,
           child: Text(
-            value.toStringAsFixed(step >= 1 ? 0 : 1),
+            _label,
             style: const TextStyle(
               color: AppColors.accentGold,
               fontWeight: FontWeight.bold,

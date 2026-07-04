@@ -14,7 +14,7 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '../stores/authStore';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL
-  || 'http://34.124.228.3:8000/api/v1';
+  || 'http://34.124.228.3/api/v1';
 
 export const api = axios.create({
   baseURL: BASE_URL,

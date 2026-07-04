@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../models/models.dart';
 import '../../../providers/cart_provider.dart';
 import '../../../services/api_service.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../utils/constants.dart';
 import '../../../widgets/shared/full_screen_image_viewer.dart';
 
@@ -37,6 +38,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       if (mounted) setState(() {
         _product    = p;
         _onWaitlist = p.isOnWaitlist;
+        // Weight-based products default to 0.5 kg (500 g) instead of 1 piece.
+        if (p.isWeighed) _quantity = 0.5;
         _loading    = false;
       });
     } catch (_) { if (mounted) setState(() => _loading = false); }
@@ -154,13 +157,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             // Quantity selector
             Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: AppColors.ice, borderRadius: BorderRadius.circular(14)),
               child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                const Text('الكمية', style: TextStyle(fontWeight: FontWeight.w600, fontFamily: 'Cairo')),
-                Row(children: [
-                  _qBtn(Icons.remove, () => setState(() => _quantity = (_quantity - 1).clamp(1, 100))),
-                  Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(_quantity.toStringAsFixed(0), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, fontFamily: 'Cairo'))),
-                  _qBtn(Icons.add, () => setState(() => _quantity++)),
-                ]),
+                Text(p.isWeighed ? 'الوزن' : 'الكمية', style: const TextStyle(fontWeight: FontWeight.w600, fontFamily: 'Cairo', color: AppColors.textMain)),
+                p.isWeighed
+                  ? Row(children: [
+                      // Weight-based: step by 250 g, minimum 250 g.
+                      _qBtn(Icons.remove, () => setState(() => _quantity = (_quantity - 0.25).clamp(0.25, 100))),
+                      Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Text(Formatters.weightLabel(_quantity), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, fontFamily: 'Cairo', color: AppColors.midnight))),
+                      _qBtn(Icons.add, () => setState(() => _quantity = (_quantity + 0.25).clamp(0.25, 100))),
+                    ])
+                  : Row(children: [
+                      _qBtn(Icons.remove, () => setState(() => _quantity = (_quantity - 1).clamp(1, 100))),
+                      Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Text(_quantity.toStringAsFixed(0), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, fontFamily: 'Cairo', color: AppColors.midnight))),
+                      _qBtn(Icons.add, () => setState(() => _quantity++)),
+                    ]),
               ])),
             const SizedBox(height: 16),
             // Description

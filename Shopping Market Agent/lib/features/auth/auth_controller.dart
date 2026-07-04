@@ -55,7 +55,9 @@ class AgentAuthController extends StateNotifier<AsyncValue<AgentSession>> {
   }
 
   final AgentAuthApi _api;
-  final _storage = const FlutterSecureStorage();
+  final _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
 
   /// Called at app start. If a token exists, fetch /me/ to verify (and detect
   /// is_blocked). Otherwise transition to unauthenticated.
@@ -78,12 +80,10 @@ class AgentAuthController extends StateNotifier<AsyncValue<AgentSession>> {
       );
       state = AsyncValue.data(session);
 
-      // Sync FCM token after login.
+      // Sync FCM token after bootstrap — use syncTokenAfterAuth() which also
+      // handles the case where the token wasn't available at init() time.
       if (!isBlocked) {
-        final fcm = AgentNotificationService.I.fcmToken;
-        if (fcm != null) {
-          try { await _api.sendFcmToken(fcm); } catch (_) {}
-        }
+        try { await AgentNotificationService.I.syncTokenAfterAuth(); } catch (_) {}
       }
     } catch (e, st) {
       debugPrint('[Auth] bootstrap failed: $e');
@@ -111,11 +111,8 @@ class AgentAuthController extends StateNotifier<AsyncValue<AgentSession>> {
       );
       state = AsyncValue.data(session);
 
-      // Sync FCM token immediately.
-      final fcm = AgentNotificationService.I.fcmToken;
-      if (fcm != null) {
-        try { await _api.sendFcmToken(fcm); } catch (_) {}
-      }
+      // Sync FCM token immediately after login.
+      try { await AgentNotificationService.I.syncTokenAfterAuth(); } catch (_) {}
     } catch (e, st) {
       state = AsyncValue.error(e, st);
       rethrow;

@@ -43,6 +43,16 @@ class Formatters {
     }
   }
 
+  /// Human label for a weight-based quantity stored in kilograms.
+  /// < 1 kg → grams ("500 جم"), otherwise kilograms ("1.5 كجم").
+  static String weightLabel(double kg) {
+    if (kg < 1) return '${(kg * 1000).round()} جم';
+    final s = kg == kg.roundToDouble()
+        ? kg.toStringAsFixed(0)
+        : kg.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+    return '$s كجم';
+  }
+
   /// Unit suffix shown after price, e.g. "/ كجم", "/ قطعة".
   static String unitSuffix(String sellUnit) {
     switch (sellUnit) {

@@ -284,12 +284,8 @@ class Order(models.Model):
     def award_points(self):
         if self.points_awarded or self.status != self.Status.DELIVERED:
             return
-        from apps.notifications.models import AppSettings
-        try:
-            points_per_egp = int(AppSettings.get('loyalty_earn_rate', '1') or 1)
-        except (TypeError, ValueError):
-            points_per_egp = 1
-        points = int(self.total_amount * points_per_egp)
+        from .loyalty import points_for_amount
+        points = points_for_amount(self.total_amount)
         if points <= 0:
             return
         self.customer.loyalty_points += points

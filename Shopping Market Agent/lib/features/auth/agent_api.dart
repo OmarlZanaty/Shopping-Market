@@ -10,7 +10,9 @@ import '../../core/storage/secure_storage_keys.dart';
 class AgentAuthApi {
   AgentAuthApi();
   Dio get _dio => DioClient.I.dio;
-  final _storage = const FlutterSecureStorage();
+  final _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
 
   /// Login with phone + password. Returns the user payload.
   Future<Map<String, dynamic>> login(String phone, String password) async {

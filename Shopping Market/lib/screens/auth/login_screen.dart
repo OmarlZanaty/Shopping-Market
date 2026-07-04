@@ -25,7 +25,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _checkBiometric() async {
     final auth = context.read<AuthProvider>();
-    final storage = const FlutterSecureStorage();
+    final storage = const FlutterSecureStorage(
+      aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    );
     final token = await storage.read(key: StorageKeys.biometricToken);
     final available = await auth.isBiometricAvailable;
     if (mounted) setState(() => _hasBiometric = available && token != null);

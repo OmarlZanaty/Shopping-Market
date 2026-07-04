@@ -19,7 +19,9 @@ class DioClient {
   factory DioClient() => _instance;
 
   late final Dio dio;
-  final _storage = const FlutterSecureStorage();
+  final _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
 
   void init() {
     dio = Dio(BaseOptions(

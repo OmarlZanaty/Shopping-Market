@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../models/models.dart';
 import '../../../services/api_service.dart';
 import '../../../utils/constants.dart';
+import '../cart/cart_screen.dart' show AddAddressSheet, labelAr;
 
 class AddressesScreen extends StatefulWidget {
   const AddressesScreen({super.key});
@@ -33,7 +34,20 @@ class _AddressesScreenState extends State<AddressesScreen> {
         backgroundColor: AppColors.coral,
         label: const Text('إضافة عنوان', style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
         icon: const Icon(Icons.add_location_alt_outlined),
-        onPressed: () {}),
+        onPressed: () => showModalBottomSheet(
+          context: context,
+          backgroundColor: AppColors.background,
+          isScrollControlled: true,
+          shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+          builder: (_) => AddAddressSheet(
+            api: _api,
+            onSaved: (addr) {
+              setState(() => _addresses.add(addr));
+            },
+          ),
+        ),
+      ),
       body: _loading
         ? const Center(child: CircularProgressIndicator(color: AppColors.coral))
         : _addresses.isEmpty
@@ -58,7 +72,7 @@ class _AddressesScreenState extends State<AddressesScreen> {
                     const SizedBox(width: 12),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Row(children: [
-                        Text(addr.label, style: const TextStyle(fontWeight: FontWeight.w700, fontFamily: 'Cairo')),
+                        Text(labelAr(addr.label), style: const TextStyle(fontWeight: FontWeight.w700, fontFamily: 'Cairo')),
                         if (addr.isDefault) ...[const SizedBox(width: 6), Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(color: AppColors.ice, borderRadius: BorderRadius.circular(100)),
                           child: const Text('الافتراضي', style: TextStyle(color: AppColors.sapphire, fontSize: 10, fontFamily: 'Cairo')))],

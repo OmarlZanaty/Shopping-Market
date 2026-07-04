@@ -1,7 +1,9 @@
 import 'package:awesome_notifications/awesome_notifications.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import '../utils/constants.dart';
+import '../router/customer_router.dart';
+import 'api_service.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -40,13 +42,48 @@ class NotificationService {
     );
 
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+
+    // App opened by tapping FCM notification while in background.
+    FirebaseMessaging.onMessageOpenedApp.listen((msg) {
+      _navigateFromData(msg.data);
+    });
+
+    // App launched from terminated state via notification tap.
+    final initial = await FirebaseMessaging.instance.getInitialMessage();
+    if (initial != null) {
+      // Delay until the router is mounted.
+      Future.delayed(const Duration(milliseconds: 800), () {
+        _navigateFromData(initial.data);
+      });
+    }
+
     AwesomeNotifications().setListeners(
       onActionReceivedMethod: _onActionReceived,
     );
 
     final token = await _fcm.getToken();
-    if (token != null) _onTokenRefresh(token);
+    if (token != null) {
+      _onTokenRefresh(token);
+    } else {
+      // Fresh installs can return null while FCM is still registering the
+      // device. Retry once shortly — otherwise this device never sends a token
+      // to the backend and silently receives no pushes.
+      Future.delayed(const Duration(seconds: 5), () async {
+        final t = await _fcm.getToken();
+        if (t != null) _onTokenRefresh(t);
+      });
+    }
     _fcm.onTokenRefresh.listen(_onTokenRefresh);
+  }
+
+  /// Navigate to the correct screen based on notification payload.
+  static void _navigateFromData(Map<String, dynamic> data) {
+    final orderId = data['order_id']?.toString() ?? '';
+    if (orderId.isEmpty) return;
+    final ctx = CustomerRouter.navigatorKey.currentContext;
+    if (ctx == null) return;
+    // Navigate to order detail — GoRouter handles auth guard automatically.
+    GoRouter.of(ctx).push('/orders/$orderId');
   }
 
   Future<void> initDriverNotifications() async {
@@ -103,6 +140,12 @@ class NotificationService {
     } else if (type == 'stock_available') {
       _showBasicNotification(
         title: '📦 المنتج متاح الآن!',
+        body: data['body_ar'] ?? '',
+        channelKey: 'market_fresh_promotions',
+      );
+    } else if (type == 'promotion') {
+      _showBasicNotification(
+        title: data['title_ar'] ?? '🎉 عرض جديد!',
         body: data['body_ar'] ?? '',
         channelKey: 'market_fresh_promotions',
       );
@@ -206,9 +249,26 @@ class NotificationService {
 
   @pragma('vm:entry-point')
   static Future<void> _onActionReceived(ReceivedAction action) async {
-    // Handle notification action taps in customer app
-    if (action.payload?['order_id'] != null) {
-      // Navigate to order detail - handled via global navigator key
+    // User tapped the notification body (not an action button) → open order detail.
+    if (action.buttonKeyPressed.isEmpty) {
+      final orderId = action.payload?['order_id'] ?? '';
+      if (orderId.isNotEmpty) {
+        _navigateFromData({'order_id': orderId});
+      }
+      return;
+    }
+
+    // Handle inline action buttons on adjustment notifications.
+    final type        = action.payload?['type'] ?? '';
+    final orderId     = action.payload?['order_id'] ?? '';
+    final adjustmentId = action.payload?['adjustment_id'] ?? '';
+
+    if (['price_change', 'substitute', 'item_added', 'quantity_change'].contains(type)) {
+      final adjIdInt = int.tryParse(adjustmentId);
+      if (adjIdInt != null) {
+        final approved = action.buttonKeyPressed == 'APPROVE';
+        ApiService().approveAdjustment(adjIdInt, approved).catchError((_) {});
+      }
     }
   }
 
@@ -222,8 +282,40 @@ class NotificationService {
   }
 
   void _onTokenRefresh(String token) {
-    // Store token and send to backend when user is logged in
-    // Handled in AuthProvider.updateFcmToken
+    // Send FCM token to backend so the server can push notifications to this device.
+    // If the user isn't logged in yet the request will fail silently (no token = 401).
+    ApiService().updateFcmToken(token).catchError((_) {});
+  }
+
+  bool _permissionAsked = false;
+
+  /// Automatic self-heal layer. Call on app launch AND every app-resume.
+  /// Silently (no visible test push):
+  ///   1. re-requests notification permission once per session if revoked,
+  ///   2. (re)fetches the FCM token with a retry,
+  ///   3. re-syncs the token to the backend so it always has a live token.
+  /// Fixes the common "device stops getting notifications" causes — missing
+  /// permission, a null/rotated token, or a token the backend cleared after a
+  /// delivery failure — without any user action.
+  Future<void> ensureHealthy() async {
+    try {
+      final settings = await _fcm.getNotificationSettings();
+      final granted =
+          settings.authorizationStatus == AuthorizationStatus.authorized ||
+              settings.authorizationStatus == AuthorizationStatus.provisional;
+      if (!granted && !_permissionAsked) {
+        _permissionAsked = true;
+        await _fcm.requestPermission(alert: true, badge: true, sound: true);
+      }
+      var token = await _fcm.getToken();
+      if (token == null) {
+        await Future.delayed(const Duration(seconds: 2));
+        token = await _fcm.getToken();
+      }
+      if (token != null) {
+        await ApiService().updateFcmToken(token).catchError((_) {});
+      }
+    } catch (_) {}
   }
 
   Future<String?> get fcmToken => _fcm.getToken();

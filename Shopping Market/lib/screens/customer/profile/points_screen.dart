@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../../services/api_service.dart';
+import '../../../providers/auth_provider.dart';
 import '../../../utils/constants.dart';
 
 class PointsScreen extends StatefulWidget {
@@ -25,6 +27,16 @@ class _PointsScreenState extends State<PointsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final points = context.watch<AuthProvider>().user?.loyaltyPoints ?? 0;
+    final value = LoyaltyConfig.valueForPoints(points);
+    // "احصل على X نقطة لكل Y جنيه"
+    final earnLabel = LoyaltyConfig.earnPerEgp > 0
+        ? '${LoyaltyConfig.earnPoints} نقطة'
+        : '—';
+    // "Z نقطة = W جنيه"
+    final redeemLabel =
+        '${LoyaltyConfig.redeemPoints} نقطة = ${LoyaltyConfig.redeemEgp.toStringAsFixed(LoyaltyConfig.redeemEgp.truncateToDouble() == LoyaltyConfig.redeemEgp ? 0 : 1)} ج';
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(title: const Text('نقاط الولاء ⭐', style: TextStyle(fontFamily: 'Cairo')), backgroundColor: AppColors.midnight),
@@ -36,13 +48,13 @@ class _PointsScreenState extends State<PointsScreen> {
             child: Column(children: [
               const Text('رصيد نقاطك', style: TextStyle(color: Colors.white70, fontFamily: 'Cairo')),
               const SizedBox(height: 8),
-              const Text('1,240', style: TextStyle(color: AppColors.gold, fontSize: 48, fontWeight: FontWeight.w700, fontFamily: 'Cairo')),
-              const Text('نقطة = 62 جنيه', style: TextStyle(color: Colors.white60, fontFamily: 'Cairo', fontSize: 13)),
+              Text('$points', style: const TextStyle(color: AppColors.gold, fontSize: 48, fontWeight: FontWeight.w700, fontFamily: 'Cairo')),
+              Text('= ${value.toStringAsFixed(2)} جنيه', style: const TextStyle(color: Colors.white60, fontFamily: 'Cairo', fontSize: 13)),
               const SizedBox(height: 16),
               Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                _miniStat('كل طلب', '× النقاط'),
-                _miniStat('100 نقطة', '= 5 ج'),
-                _miniStat('تقييم', '+5 نقاط'),
+                _miniStat('لكل ${LoyaltyConfig.earnPerEgp.toStringAsFixed(0)} ج', earnLabel),
+                _miniStat('الاستبدال', redeemLabel),
+                _miniStat('النقطة', '${LoyaltyConfig.egpPerPoint.toStringAsFixed(2)} ج'),
               ]),
             ])),
           Expanded(child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: const [

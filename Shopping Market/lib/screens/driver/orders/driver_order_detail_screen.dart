@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../models/models.dart';
 import '../../../services/api_service.dart';
 import '../../../utils/constants.dart';
@@ -25,7 +26,7 @@ class _DriverOrderDetailScreenState extends State<DriverOrderDetailScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final order = await _api.getOrder(widget.orderId);
+      final order = await _api.getAgentOrder(widget.orderId);
       if (mounted) setState(() { _order = order; _loading = false; });
     } catch (_) { if (mounted) setState(() => _loading = false); }
   }
@@ -47,11 +48,19 @@ class _DriverOrderDetailScreenState extends State<DriverOrderDetailScreen> {
     } catch (e) { _showToast('خطأ: $e', error: true); }
   }
 
+  Future<void> _startPreparing() async {
+    try {
+      await _api.startPreparing(widget.orderId);
+      _load();
+      _showToast('بدأ التحضير 📦');
+    } catch (e) { _showToast('خطأ: $e', error: true); }
+  }
+
   Future<void> _startDelivery() async {
     try {
       await _api.startDelivery(widget.orderId);
       _load();
-      _showToast('بدأ التوصيل 🛵');
+      _showToast('الطلب جاهز للتوصيل 🛵');
     } catch (e) { _showToast('خطأ: $e', error: true); }
   }
 
@@ -160,15 +169,19 @@ class _DriverOrderDetailScreenState extends State<DriverOrderDetailScreen> {
                 child: Text(_payLabel(o.paymentMethod), style: TextStyle(color: _payColor(o.paymentMethod), fontSize: 12, fontWeight: FontWeight.w700, fontFamily: 'Cairo'))),
             ]),
             const SizedBox(height: 14),
-            // Primary action button
+            // Primary action button — full lifecycle: new → accepted → preparing → out_for_delivery → delivered
             if (o.status == 'new') SizedBox(width: double.infinity, height: 48, child: ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.mint, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
               onPressed: _acceptOrder,
               child: const Text('✅ قبول الطلب', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, fontFamily: 'Cairo')))),
+            if (o.status == 'accepted') SizedBox(width: double.infinity, height: 48, child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.gold, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+              onPressed: _startPreparing,
+              child: const Text('📋 بدء التحضير', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, fontFamily: 'Cairo')))),
             if (o.status == 'preparing') SizedBox(width: double.infinity, height: 48, child: ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.coral, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
               onPressed: _startDelivery,
-              child: const Text('🛵 بدء التوصيل', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, fontFamily: 'Cairo')))),
+              child: const Text('🛵 الطلب جاهز للتوصيل', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, fontFamily: 'Cairo')))),
             if (o.status == 'out_for_delivery') SizedBox(width: double.infinity, height: 48, child: ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.sapphire, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
               onPressed: _markDelivered,
@@ -182,11 +195,19 @@ class _DriverOrderDetailScreenState extends State<DriverOrderDetailScreen> {
             Row(children: [
               const Icon(Icons.person_outline, color: AppColors.sapphire, size: 20),
               const SizedBox(width: 8),
-              Text(o.customerName ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontFamily: 'Cairo')),
-              const Spacer(),
-              IconButton(icon: Container(width: 36, height: 36, decoration: BoxDecoration(color: AppColors.mint, borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.phone_rounded, color: Colors.white, size: 18)),
-                onPressed: () {}),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(o.customerName ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontFamily: 'Cairo')),
+                if (o.deliveryPhone.isNotEmpty)
+                  Text(o.deliveryPhone, style: const TextStyle(fontSize: 12, color: AppColors.textMuted, fontFamily: 'Cairo')),
+              ])),
+              if (o.deliveryPhone.isNotEmpty)
+                IconButton(
+                  icon: Container(width: 36, height: 36, decoration: BoxDecoration(color: AppColors.mint, borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.phone_rounded, color: Colors.white, size: 18)),
+                  onPressed: () async {
+                    final uri = Uri(scheme: 'tel', path: o.deliveryPhone);
+                    if (await canLaunchUrl(uri)) launchUrl(uri);
+                  }),
             ]),
             const SizedBox(height: 6),
             Row(children: [

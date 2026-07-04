@@ -161,6 +161,7 @@ class ProductModel {
   final bool isAvailable;
   final bool isFeatured;
   final String sellUnit;
+  final bool isWeightBased;
   final String mainImageUrl;
   /// Extra gallery image URLs (from the ProductImage table).
   final List<String> galleryUrls;
@@ -189,6 +190,7 @@ class ProductModel {
     this.isAvailable = true,
     this.isFeatured = false,
     this.sellUnit = 'piece',
+    this.isWeightBased = false,
     this.mainImageUrl = '',
     this.galleryUrls = const [],
     this.categories = const [],
@@ -215,6 +217,7 @@ class ProductModel {
     isAvailable:         j['is_available'] ?? true,
     isFeatured:          j['is_featured'] ?? false,
     sellUnit:            j['sell_unit'] ?? 'piece',
+    isWeightBased:       j['is_weight_based'] ?? false,
     mainImageUrl:        j['image_url_s3'] ?? j['thumbnail_url'] ?? j['main_image_url'] ?? j['image_url'] ?? '',
     galleryUrls:         (j['images'] as List? ?? [])
                             .map((im) => (im is Map
@@ -235,6 +238,12 @@ class ProductModel {
   String name(String lang) => lang == 'ar' ? nameAr : nameEn;
   String description(String lang) => lang == 'ar' ? descriptionAr : descriptionEn;
   double get savings => originalPrice - currentPrice;
+
+  /// True when this product is sold by weight (price is per kg) — the customer
+  /// picks grams instead of a piece count. Honours the explicit backend flag
+  /// and also infers it from a weight/volume sell unit for older rows.
+  bool get isWeighed =>
+      isWeightBased || sellUnit == 'kg' || sellUnit == 'gram' || sellUnit == 'liter';
 
   /// All images for the carousel: main image first, then the gallery, deduped.
   List<String> get allImageUrls {

@@ -1,7 +1,7 @@
 name: market_fresh
 description: Market Fresh - Smart Supermarket Delivery App
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+7
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -42,6 +42,7 @@ dependencies:
 
   # Firebase & Notifications
   firebase_core: ^2.24.2
+  firebase_auth: ^4.17.8
   firebase_messaging: ^14.7.10
   flutter_local_notifications: ^17.2.4
   awesome_notifications: ^0.11.0

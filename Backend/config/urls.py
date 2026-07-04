@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from django.conf import settings
 from django.views.static import serve as _media_serve
+from django.views.generic import TemplateView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 urlpatterns = [
@@ -29,6 +30,7 @@ urlpatterns = [
     path('api/v1/reports/', include(('apps.analytics.reports.urls', 'reports'), namespace='reports')),
     path('api/v1/analytics/', include('apps.analytics.urls')),
     path('api/v1/', include(('apps.core.urls', 'core'), namespace='core')),
+    path('privacy-policy/', TemplateView.as_view(template_name='privacy_policy.html'), name='privacy_policy'),
 
     # ───────── Spec-shape aliases (no v1 prefix, matches the prompt verbatim) ─────────
     path('api/auth/', include('apps.users.urls')),

@@ -9,7 +9,6 @@ import '../../../core/constants/app_dimensions.dart';
 import '../../../core/constants/app_typography.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/status_badge.dart';
-import '../../auth/auth_controller.dart';
 import '../data/order_models.dart';
 import '../data/orders_providers.dart';
 
@@ -20,8 +19,6 @@ class OrderDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final orderAsync = ref.watch(orderDetailProvider(orderId));
-    final session = ref.watch(agentAuthControllerProvider).valueOrNull;
-    final isPreparer = session?.role == AgentRole.preparer;
 
     return Scaffold(
       appBar: AppBar(title: const Text('تفاصيل الطلب')),
@@ -38,7 +35,7 @@ class OrderDetailScreen extends ConsumerWidget {
               const SizedBox(height: 12),
               _customerCard(context, ref, order),
               const SizedBox(height: 12),
-              _itemsCard(context, order, isPreparer: isPreparer),
+              _itemsCard(context, order),
               const SizedBox(height: 12),
               _paymentCard(order),
               if (order.notes.isNotEmpty) ...[
@@ -51,7 +48,7 @@ class OrderDetailScreen extends ConsumerWidget {
         ),
       ),
       bottomNavigationBar: orderAsync.maybeWhen(
-        data: (o) => _ActionBar(order: o, isPreparer: isPreparer),
+        data: (o) => _ActionBar(order: o),
         orElse: () => null,
       ),
     );
@@ -148,7 +145,7 @@ class OrderDetailScreen extends ConsumerWidget {
         ),
       );
 
-  Widget _itemsCard(BuildContext context, OrderModel o, {required bool isPreparer}) =>
+  Widget _itemsCard(BuildContext context, OrderModel o) =>
       Container(
         padding: const EdgeInsets.all(AppDimensions.cardInner),
         decoration: BoxDecoration(
@@ -159,11 +156,12 @@ class OrderDetailScreen extends ConsumerWidget {
           Row(children: [
             const Text('الأصناف', style: AppTypography.sectionHeader),
             const Spacer(),
-            Text('${o.items.length}', style: AppTypography.smallLabel),
+            Text('${o.itemCount}', style: AppTypography.smallLabel),
           ]),
           const SizedBox(height: 8),
           ...o.items.map((it) => _itemRow(it)),
-          if (isPreparer && (o.status == 'accepted' || o.status == 'preparing')) ...[
+          // Show picking button whenever the order is in an active preparation stage.
+          if (o.status == 'accepted' || o.status == 'preparing') ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
@@ -201,7 +199,7 @@ class OrderDetailScreen extends ConsumerWidget {
                 Text(it.barcode!, style: AppTypography.smallLabel.copyWith(fontFamily: 'Inter')),
             ]),
           ),
-          Text('${it.requestedQty.toStringAsFixed(it.isWeightBased ? 2 : 0)} ${it.unitType}',
+          Text(it.isWeighed ? it.qtyLabel(it.requestedQty) : '${it.requestedQty.toStringAsFixed(0)} قطعة',
               style: AppTypography.body),
         ]),
       );
@@ -289,8 +287,7 @@ ${mapsUrl.isNotEmpty ? "اللوكيشن: $mapsUrl\n" : ""}رقم الأوردر
 
 class _ActionBar extends ConsumerWidget {
   final OrderModel order;
-  final bool isPreparer;
-  const _ActionBar({required this.order, required this.isPreparer});
+  const _ActionBar({required this.order});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -300,6 +297,7 @@ class _ActionBar extends ConsumerWidget {
       try {
         await op();
         ref.refresh(orderDetailProvider(order.id));
+        ref.invalidate(ordersListProvider); // refresh all tabs
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(successMsg),
@@ -323,24 +321,59 @@ class _ActionBar extends ConsumerWidget {
           ),
         );
 
+    /// Simple confirm-delivery dialog — no photo, no amount entry.
+    Future<void> confirmDelivered() async {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: AppColors.backgroundSecondary,
+          title: const Text('تأكيد التسليم'),
+          content: Text('هل تم تسليم الطلب ${order.orderNumber} للعميل؟'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('لا'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.successGreen),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('نعم، تم التسليم'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !context.mounted) return;
+      try {
+        await api.delivered(order.id);
+        if (!context.mounted) return;
+        // Invalidate BEFORE navigating so ref is still bound to a live widget.
+        ref.invalidate(ordersListProvider);
+        ref.invalidate(orderDetailProvider(order.id));
+        context.go('/');
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.toString()),
+          backgroundColor: AppColors.errorRed,
+        ));
+      }
+    }
+
     final actions = <Widget>[];
-    if (isPreparer) {
-      if (order.status == 'accepted') {
-        actions.add(btn('بدء التحضير', AppColors.accentOrange,
+
+    // Single-agent flow: same person handles the entire lifecycle.
+    switch (order.status) {
+      case 'new':
+        actions.add(btn('✅ قبول الطلب', AppColors.successGreen,
+            () => run(() => api.accept(order.id), 'تم قبول الطلب')));
+      case 'accepted':
+        actions.add(btn('📋 بدء التحضير', AppColors.accentOrange,
             () => run(() => api.startPreparing(order.id), 'بدأ التحضير')));
-      } else if (order.status == 'preparing') {
-        actions.add(btn('جاهز للتوصيل', AppColors.successGreen,
-            () => run(() => api.markReady(order.id), 'الطلب جاهز')));
-      }
-    } else {
-      // Driver
-      if (order.status == 'ready') {
-        actions.add(btn('تأكيد الاستلام من الفرع', AppColors.accentOrange,
-            () => run(() => api.pickedUp(order.id), 'بدأ التوصيل')));
-      } else if (order.status == 'out_for_delivery') {
-        actions.add(btn('تسليم الطلب', AppColors.successGreen,
-            () => GoRouter.of(context).push('/delivery/${order.id}')));
-      }
+      case 'preparing':
+        actions.add(btn('🛵 الطلب جاهز للتوصيل', AppColors.accentOrange,
+            () => run(() => api.markReady(order.id), 'الطلب جاهز وخرج للتوصيل')));
+      case 'out_for_delivery':
+        actions.add(btn('📦 تأكيد التسليم', AppColors.successGreen, confirmDelivered));
     }
 
     if (actions.isEmpty) return const SizedBox.shrink();

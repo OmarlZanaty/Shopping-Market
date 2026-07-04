@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:awesome_notifications/awesome_notifications.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Color;
+import '../network/dio_client.dart';
 
 /// Single notification entrypoint. Sets up 3 awesome_notifications channels
 /// with distinct sounds, registers the FCM token, and emits a stream of
@@ -18,6 +20,37 @@ class AgentNotificationService {
   String? _fcmToken;
   String? get fcmToken => _fcmToken;
 
+  bool _permissionAsked = false;
+
+  /// Automatic self-heal layer. Call on app launch AND every app-resume.
+  /// Silently (no visible test push):
+  ///   1. re-requests notification permission once per session if revoked,
+  ///   2. (re)fetches the FCM token with a retry,
+  ///   3. re-syncs the token to the backend so it always has a live token.
+  /// This fixes the common "device stops getting notifications" causes —
+  /// missing permission, a null/rotated token, or a token the backend cleared
+  /// after a delivery failure — without any user action.
+  Future<void> ensureHealthy() async {
+    try {
+      final fcm = FirebaseMessaging.instance;
+      final allowed = await AwesomeNotifications().isNotificationAllowed();
+      if (!allowed && !_permissionAsked) {
+        _permissionAsked = true;
+        await AwesomeNotifications().requestPermissionToSendNotifications();
+        await fcm.requestPermission(
+            alert: true, badge: true, sound: true, criticalAlert: true);
+      }
+      _fcmToken ??= await fcm.getToken();
+      if (_fcmToken == null) {
+        await Future.delayed(const Duration(seconds: 2));
+        _fcmToken = await fcm.getToken();
+      }
+      if (_fcmToken != null) await _sendTokenToBackend(_fcmToken!);
+    } catch (e) {
+      debugPrint('[Agent FCM] ensureHealthy failed: $e');
+    }
+  }
+
   Future<void> init() async {
     // ── Awesome Notifications ─────────────────────────────────────────────
     await AwesomeNotifications().initialize(
@@ -32,7 +65,6 @@ class AgentNotificationService {
           playSound: true,
           enableVibration: true,
           criticalAlerts: true,
-          soundSource: 'resource://raw/new_order',
           defaultColor: const Color(0xFFFF6B35),
           ledColor: const Color(0xFFFF6B35),
         ),
@@ -43,7 +75,6 @@ class AgentNotificationService {
           importance: NotificationImportance.High,
           playSound: true,
           enableVibration: true,
-          soundSource: 'resource://raw/adjustment',
         ),
         NotificationChannel(
           channelKey: 'agent_general',
@@ -67,37 +98,92 @@ class AgentNotificationService {
     _fcmToken = await fcm.getToken();
     debugPrint('[Agent FCM] token=$_fcmToken');
 
+    // On first install getToken() can return null while Firebase registers the
+    // device. Retry once after a short delay so bootstrap() has a token to sync.
+    if (_fcmToken == null) {
+      Future.delayed(const Duration(seconds: 5), () async {
+        _fcmToken = await fcm.getToken();
+        if (_fcmToken != null) {
+          debugPrint('[Agent FCM] token (retry)=$_fcmToken');
+          _sendTokenToBackend(_fcmToken!);
+        }
+      });
+    }
+
     fcm.onTokenRefresh.listen((t) {
       _fcmToken = t;
+      debugPrint('[Agent FCM] token refreshed=$t');
+      _sendTokenToBackend(t);
     });
 
     FirebaseMessaging.onMessage.listen(_onForegroundMessage);
     FirebaseMessaging.onMessageOpenedApp.listen(_onMessageTap);
   }
 
+  /// Called by [AgentAuthController] after a successful login or bootstrap so
+  /// the token is synced even if [init()] ran before the user was authenticated.
+  Future<void> syncTokenAfterAuth() async {
+    if (_fcmToken != null) {
+      await _sendTokenToBackend(_fcmToken!);
+    }
+  }
+
+  /// Second layer: re-sync the token, then ask the server to send a test push to
+  /// this device. Returns {has_token, fcm_sent} so the UI can explain the result.
+  Future<Map<String, dynamic>> sendTestNotification() async {
+    // Make sure the token (possibly fetched after a retry) is on the backend.
+    _fcmToken ??= await FirebaseMessaging.instance.getToken();
+    if (_fcmToken != null) await _sendTokenToBackend(_fcmToken!);
+    final res = await DioClient.I.dio.post('/notifications/test/');
+    final body = res.data;
+    return (body is Map && body['data'] is Map)
+        ? Map<String, dynamic>.from(body['data'] as Map)
+        : (body is Map ? Map<String, dynamic>.from(body) : <String, dynamic>{});
+  }
+
+  /// Sends the FCM token to the backend. Called on init and on every token refresh.
+  /// Uses DioClient which already injects the stored access token via interceptors.
+  Future<void> _sendTokenToBackend(String token) async {
+    try {
+      await DioClient.I.dio.post('/auth/fcm-token/', data: {'fcm_token': token});
+      debugPrint('[Agent FCM] token synced to backend');
+    } catch (e) {
+      debugPrint('[Agent FCM] token sync failed (may not be logged in yet): $e');
+    }
+  }
+
   void _onForegroundMessage(RemoteMessage msg) {
     final type = msg.data['type'] ?? '';
+    final payload = Map<String, String?>.from(msg.data.map((k, v) => MapEntry(k, v?.toString())));
     if (type == 'new_order') {
       _newOrderCtrl.add(Map<String, dynamic>.from(msg.data));
       _showLocalNotification(
         channelKey: 'agent_new_order',
         title: msg.notification?.title ?? 'طلب جديد',
         body: msg.notification?.body ?? '',
-        payload: Map<String, String?>.from(msg.data.map((k, v) => MapEntry(k, v?.toString()))),
+        payload: payload,
+      );
+    } else if (type == 'order_status') {
+      // Status changed on an order the agent is handling
+      _showLocalNotification(
+        channelKey: 'agent_adjustment',
+        title: msg.notification?.title ?? 'تحديث الطلب',
+        body: msg.notification?.body ?? msg.data['body_ar'] ?? '',
+        payload: payload,
       );
     } else if (type == 'adjustment_response') {
       _showLocalNotification(
         channelKey: 'agent_adjustment',
         title: msg.notification?.title ?? 'تحديث على الطلب',
         body: msg.notification?.body ?? '',
-        payload: Map<String, String?>.from(msg.data.map((k, v) => MapEntry(k, v?.toString()))),
+        payload: payload,
       );
     } else {
       _showLocalNotification(
         channelKey: 'agent_general',
         title: msg.notification?.title ?? 'إشعار',
         body: msg.notification?.body ?? '',
-        payload: Map<String, String?>.from(msg.data.map((k, v) => MapEntry(k, v?.toString()))),
+        payload: payload,
       );
     }
   }

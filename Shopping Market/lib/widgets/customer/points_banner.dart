@@ -4,7 +4,8 @@ import '../../utils/constants.dart';
 
 class PointsBanner extends StatelessWidget {
   final UserModel user;
-  const PointsBanner({super.key, required this.user});
+  final VoidCallback? onTap;
+  const PointsBanner({super.key, required this.user, this.onTap});
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -23,10 +24,13 @@ class PointsBanner extends StatelessWidget {
           const Text('رصيد نقاط الولاء', style: TextStyle(color: Colors.white60, fontSize: 10, fontFamily: 'Cairo')),
         ]),
         const Spacer(),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(color: AppColors.gold.withOpacity(0.2), borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.gold.withOpacity(0.5))),
-          child: const Text('استخدم الآن', style: TextStyle(color: AppColors.gold, fontSize: 10, fontWeight: FontWeight.w700, fontFamily: 'Cairo')),
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(color: AppColors.gold.withOpacity(0.2), borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.gold.withOpacity(0.5))),
+            child: const Text('استخدم الآن', style: TextStyle(color: AppColors.gold, fontSize: 10, fontWeight: FontWeight.w700, fontFamily: 'Cairo')),
+          ),
         ),
       ]),
     );

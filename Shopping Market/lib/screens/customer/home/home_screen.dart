@@ -19,7 +19,7 @@ import '../../../widgets/customer/banner_slider.dart';
 import '../../../widgets/customer/points_banner.dart';
 import '../../../widgets/shared/barcode_scanner_screen.dart';
 import '../../../widgets/shared/product_card.dart';
-import '../categories/all_categories_screen.dart';
+import '../categories/category_products_screen.dart';
 import '../notifications/notifications_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -45,31 +45,22 @@ class _HomeScreenState extends State<HomeScreen>
   late final Animation<double> _aniPromo;      // promo chips
   late final Animation<double> _aniCats;       // categories
   late final Animation<double> _aniFlash;      // flash deals
-  late final Animation<double> _aniProdHdr;    // products section header
   // Slide counterparts (Offset animations)
   late final Animation<Offset> _slidePoints;
   late final Animation<Offset> _slideBanner;
   late final Animation<Offset> _slidePromo;
   late final Animation<Offset> _slideCats;
   late final Animation<Offset> _slideFlash;
-  late final Animation<Offset> _slideProdHdr;
 
   // ── Data ──────────────────────────────────────────────────────────────────
   List<BannerModel>    _banners              = [];
   List<CategoryModel>  _categories           = [];
-  List<ProductModel>   _products             = [];
   List<ProductModel>   _featuredProducts     = [];
   List<ProductModel>   _recommendations      = [];
   List<ProductModel>   _smartCartItems       = [];
   Map<String, dynamic> _appSettings         = {};
 
-  // Key used to scroll the CustomScrollView to the products section
-  final _productsKey = GlobalKey();
-
-  int  _selectedCategory = 0;
   bool _loading          = true;
-  int  _page             = 1;
-  bool _hasMore          = true;
 
   // ── Notifications ─────────────────────────────────────────────────────────
   int _unreadCount = 0;
@@ -98,7 +89,6 @@ class _HomeScreenState extends State<HomeScreen>
     _aniPromo   = _makeInterval(0.1,  0.5);
     _aniCats    = _makeInterval(0.2,  0.65);
     _aniFlash   = _makeInterval(0.35, 0.75);
-    _aniProdHdr = _makeInterval(0.5,  0.9);
     // Slide animations (same tween, different parent)
     final _t = _SlideOffsetTween();
     _slidePoints  = _t.animate(_aniPoints);
@@ -106,12 +96,10 @@ class _HomeScreenState extends State<HomeScreen>
     _slidePromo   = _t.animate(_aniPromo);
     _slideCats    = _t.animate(_aniCats);
     _slideFlash   = _t.animate(_aniFlash);
-    _slideProdHdr = _t.animate(_aniProdHdr);
 
     _loadData();
     _detectLocation();
     _loadUnreadCount();
-    _scrollCtrl.addListener(_onScroll);
   }
 
   @override
@@ -123,14 +111,48 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  // ── Data loading ──────────────────────────────────────────────────────────
-  void _onScroll() {
-    if (_scrollCtrl.position.pixels >=
-        _scrollCtrl.position.maxScrollExtent - 200) {
-      if (_hasMore && !_loading) _loadMoreProducts();
-    }
+  // ── Navigation ────────────────────────────────────────────────────────────
+  // Opens the products of a category on a dedicated screen. The home screen
+  // itself no longer renders a product grid — it only lists the categories.
+  void _openCategory(CategoryModel cat) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CategoryProductsScreen(
+          title: cat.id == 0 ? 'جميع المنتجات' : cat.nameAr,
+          categoryId: cat.id,
+        ),
+      ),
+    );
   }
 
+  void _openCategoryById(int id) {
+    final cat = _categories.where((c) => c.id == id).firstOrNull;
+    _openCategory(cat ??
+        const CategoryModel(id: 0, nameAr: 'المنتجات', nameEn: 'Products'));
+  }
+
+  // Opens a filtered products screen (used by the promo chips).
+  void _openProducts({
+    required String title,
+    bool? featured,
+    bool? hasDiscount,
+    String? search,
+  }) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CategoryProductsScreen(
+          title: title,
+          featured: featured,
+          hasDiscount: hasDiscount,
+          search: search,
+        ),
+      ),
+    );
+  }
+
+  // ── Data loading ──────────────────────────────────────────────────────────
   Future<void> _loadData() async {
     setState(() => _loading = true);
 
@@ -154,24 +176,18 @@ class _HomeScreenState extends State<HomeScreen>
       final results = await Future.wait([
         _safe(() => _api.getBanners(position: 'home_main'), <BannerModel>[]),
         _safe(() => _api.getCategories(),                  <CategoryModel>[]),
-        _safe(() => _api.getProducts(page: 1),
-              <String, dynamic>{'results': [], 'next': null}),
         _safe(() => _api.getProducts(featured: true),
               <String, dynamic>{'results': [], 'next': null}),
         _safe(() => _api.getAppSettings(),                 <String, dynamic>{}),
       ]);
       if (!mounted) return;
-      final productsData  = results[2] as Map<String, dynamic>;
-      final featuredData  = results[3] as Map<String, dynamic>;
+      final featuredData  = results[2] as Map<String, dynamic>;
       setState(() {
         _banners          = results[0] as List<BannerModel>;
         _categories       = results[1] as List<CategoryModel>;
-        _products         = (productsData['results'] as List? ?? [])
-            .map((p) => ProductModel.fromJson(p)).toList();
-        _hasMore          = productsData['next'] != null;
         _featuredProducts = (featuredData['results'] as List? ?? [])
             .map((p) => ProductModel.fromJson(p)).toList();
-        _appSettings      = results[4] as Map<String, dynamic>;
+        _appSettings      = results[3] as Map<String, dynamic>;
         _loading          = false;
       });
       _fadeCtrl.forward(from: 0);
@@ -201,60 +217,6 @@ class _HomeScreenState extends State<HomeScreen>
       final smart = await _api.getSmartCart();
       if (mounted && smart.isNotEmpty) setState(() => _smartCartItems = smart);
     } catch (_) {}
-  }
-
-  Future<void> _loadMoreProducts() async {
-    if (!_hasMore || _loading) return;
-    setState(() => _loading = true);
-    _page++;
-    try {
-      final data = await _api.getProducts(
-        page: _page,
-        category: _selectedCategory == 0 ? null : _selectedCategory,
-      );
-      final more = (data['results'] as List? ?? [])
-          .map((p) => ProductModel.fromJson(p)).toList();
-      if (mounted) {
-        setState(() {
-          _products.addAll(more);
-          _hasMore = data['next'] != null;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _filterByCategory(int id) async {
-    setState(() { _selectedCategory = id; _page = 1; _loading = true; });
-    try {
-      final data = await _api.getProducts(
-        category: id == 0 ? null : id, page: 1,
-      );
-      if (mounted) {
-        setState(() {
-          _products = (data['results'] as List? ?? [])
-              .map((p) => ProductModel.fromJson(p)).toList();
-          _hasMore  = data['next'] != null;
-          _loading  = false;
-        });
-        // Scroll to products section after the frame is rendered
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final ctx = _productsKey.currentContext;
-          if (ctx != null) {
-            Scrollable.ensureVisible(
-              ctx,
-              duration: const Duration(milliseconds: 500),
-              curve: Curves.easeInOutCubic,
-              alignment: 0.0,
-            );
-          }
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
   }
 
   // ── Location ──────────────────────────────────────────────────────────────
@@ -333,7 +295,7 @@ class _HomeScreenState extends State<HomeScreen>
             _buildHeader(cartCount),
 
             // ── Shimmer while first load ─────────────────────────────────
-            if (_loading && _products.isEmpty)
+            if (_loading)
               SliverToBoxAdapter(child: _buildShimmer())
             else
               ..._buildSlivers(user),
@@ -561,7 +523,10 @@ class _HomeScreenState extends State<HomeScreen>
             _aniPoints, _slidePoints,
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-              child: PointsBanner(user: user),
+              child: PointsBanner(
+                user: user,
+                onTap: () => context.push('/profile/points'),
+              ),
             ),
           ),
         ),
@@ -576,7 +541,17 @@ class _HomeScreenState extends State<HomeScreen>
           RepaintBoundary(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(0, 14, 0, 0),
-              child: BannerSlider(banners: _banners),
+              child: BannerSlider(
+                banners: _banners,
+                onBannerTap: (b) {
+                  if (b.linkType == 'category' && b.linkCategoryId != null) {
+                    _openCategoryById(b.linkCategoryId!);
+                  } else if (b.linkType == 'product' && b.linkProductId != null) {
+                    context.push('/product/${b.linkProductId}');
+                  }
+                },
+                onShopNow: () => _openProducts(title: 'جميع المنتجات'),
+              ),
             ),
           ),
         ),
@@ -590,29 +565,34 @@ class _HomeScreenState extends State<HomeScreen>
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
             child: Row(children: [
-              _promoChip('🔥 عروض فلاش', AppColors.coral, AppColors.peach),
+              _promoChip('🔥 عروض فلاش', AppColors.coral, AppColors.peach,
+                  onTap: () => _openProducts(
+                      title: '🔥 عروض فلاش', hasDiscount: true)),
               const SizedBox(width: 8),
-              _promoChip('🌿 عضوي', AppColors.mint, AppColors.seafoam),
+              _promoChip('🌿 عضوي', AppColors.mint, AppColors.seafoam,
+                  onTap: () =>
+                      _openProducts(title: '🌿 عضوي', search: 'عضوي')),
               const SizedBox(width: 8),
-              _promoChip('⭐ الأكثر مبيعاً', AppColors.gold, AppColors.lemon),
+              _promoChip('⭐ الأكثر مبيعاً', AppColors.gold, AppColors.lemon,
+                  onTap: () => _openProducts(
+                      title: '⭐ الأكثر مبيعاً', featured: true)),
               const SizedBox(width: 8),
               _promoChip('🎁 وصل حديثاً', AppColors.watermelon,
-                  AppColors.watermelon.withOpacity(0.1)),
+                  AppColors.watermelon.withOpacity(0.1),
+                  onTap: () => _openProducts(title: '🎁 وصل حديثاً')),
             ]),
           ),
         ),
       ),
 
-      // ── Categories (max 6 shown) ───────────────────────────────────
+      // ── Categories (all shown — tapping opens the category screen) ──
       if (_categories.isNotEmpty)
         SliverToBoxAdapter(
           child: _animated(
             _aniCats, _slideCats,
             _CategoriesSection(
               categories: _categories,
-              selectedId: _selectedCategory,
-              onSelect: _filterByCategory,
-              onViewAll: _showAllCategories,
+              onOpen: _openCategory,
             ),
           ),
         ),
@@ -648,70 +628,8 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
 
-      // ── Products grid header ───────────────────────────────────────
-      SliverToBoxAdapter(
-        key: _productsKey,
-        child: _animated(
-          _aniProdHdr, _slideProdHdr,
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
-            child: Row(children: [
-              Expanded(
-                child: Text(
-                  _selectedCategory == 0
-                      ? 'جميع المنتجات'
-                      : _categories
-                              .where((c) => c.id == _selectedCategory)
-                              .firstOrNull
-                              ?.nameAr ??
-                          'المنتجات',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    fontFamily: 'Cairo',
-                    color: AppColors.textMain,
-                  ),
-                ),
-              ),
-            ]),
-          ),
-        ),
-      ),
-
-      // ── Products grid (virtualised SliverGrid) ─────────────────────
-      SliverPadding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-        sliver: SliverGrid(
-          delegate: SliverChildBuilderDelegate(
-            (_, i) => ProductCard(product: _products[i]),
-            childCount: _products.length,
-            // Recycle cells that leave the viewport
-            addRepaintBoundaries: true,
-            addAutomaticKeepAlives: false,
-          ),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 0.72,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-          ),
-        ),
-      ),
-
-      // ── Pagination indicator / bottom padding ──────────────────────
-      SliverToBoxAdapter(
-        child: _hasMore
-            ? _loading
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Center(
-                      child: CircularProgressIndicator(
-                          color: AppColors.coral, strokeWidth: 2.5),
-                    ),
-                  )
-                : const SizedBox(height: 16)
-            : const SizedBox(height: 32),
-      ),
+      // ── Bottom padding ─────────────────────────────────────────────
+      const SliverToBoxAdapter(child: SizedBox(height: 32)),
     ];
   }
 
@@ -728,19 +646,22 @@ class _HomeScreenState extends State<HomeScreen>
       );
 
   // ── Promo chip ────────────────────────────────────────────────────────────
-  Widget _promoChip(String label, Color textColor, Color bgColor) =>
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(100),
-          border: Border.all(color: textColor.withOpacity(0.25)),
+  Widget _promoChip(String label, Color textColor, Color bgColor, {VoidCallback? onTap}) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(100),
+            border: Border.all(color: textColor.withOpacity(0.25)),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600,
+                color: textColor, fontFamily: 'Cairo',
+              )),
         ),
-        child: Text(label,
-            style: TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600,
-              color: textColor, fontFamily: 'Cairo',
-            )),
       );
 
   // ═══════════════════════════════════════════════
@@ -822,24 +743,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   // ═══════════════════════════════════════════════
-  // ALL CATEGORIES SCREEN
-  // ═══════════════════════════════════════════════
-  Future<void> _showAllCategories() async {
-    final selectedId = await Navigator.push<int>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AllCategoriesScreen(
-          categories: _categories,
-          selectedId: _selectedCategory,
-        ),
-      ),
-    );
-    if (selectedId != null && mounted) {
-      _filterByCategory(selectedId);
-    }
-  }
-
-  // ═══════════════════════════════════════════════
   // SEARCH BOTTOM SHEET
   // ═══════════════════════════════════════════════
   void _showSearch(BuildContext context) {
@@ -863,30 +766,20 @@ class _SlideOffsetTween extends Tween<Offset> {
 // ══════════════════════════════════════════════════════════════════════════════
 class _CategoriesSection extends StatelessWidget {
   final List<CategoryModel> categories;
-  final int selectedId;
-  final void Function(int) onSelect;
-  final VoidCallback onViewAll;
-
-  static const _maxVisible = 6; // "الكل" counts as one of the 6
+  final void Function(CategoryModel) onOpen;
 
   const _CategoriesSection({
     required this.categories,
-    required this.selectedId,
-    required this.onSelect,
-    required this.onViewAll,
+    required this.onOpen,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Show every category (plus an "All" shortcut at the top).
     final all = [
       const CategoryModel(id: 0, nameAr: 'الكل', nameEn: 'All', icon: '🛒'),
       ...categories,
     ];
-    // Show at most _maxVisible items; rest are in the full-screen
-    final visible = all.length > _maxVisible
-        ? all.sublist(0, _maxVisible)
-        : all;
-    final hasMore = all.length > _maxVisible;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
@@ -910,40 +803,14 @@ class _CategoriesSection extends StatelessWidget {
                 fontSize: 18, fontWeight: FontWeight.w800,
                 fontFamily: 'Cairo', color: AppColors.textMain,
               )),
-          const Spacer(),
-          GestureDetector(
-            onTap: onViewAll,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                    colors: [AppColors.coral, Color(0xFFFF6B00)]),
-                borderRadius: BorderRadius.circular(100),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Text(
-                  hasMore
-                      ? 'عرض الكل (${all.length})'
-                      : 'عرض الكل',
-                  style: const TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w700,
-                    color: Colors.white, fontFamily: 'Cairo',
-                  ),
-                ),
-                const SizedBox(width: 4),
-                const Icon(Icons.arrow_forward_ios_rounded,
-                    color: Colors.white, size: 10),
-              ]),
-            ),
-          ),
         ]),
         const SizedBox(height: 14),
 
-        // 3-column grid (max 6 items — bounded, so shrinkWrap is safe here)
+        // 3-column grid of all categories (bounded count, shrinkWrap is safe).
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: visible.length,
+          itemCount: all.length,
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 3,
             childAspectRatio: 0.85,
@@ -951,14 +818,13 @@ class _CategoriesSection extends StatelessWidget {
             mainAxisSpacing: 10,
           ),
           itemBuilder: (_, i) {
-            final cat = visible[i];
+            final cat = all[i];
             return _CategoryCard(
               category: cat,
-              selected: cat.id == selectedId,
-              onTap: () => onSelect(cat.id),
+              selected: false,
+              onTap: () => onOpen(cat),
               index: i,
             );
-
           },
         ),
       ]),

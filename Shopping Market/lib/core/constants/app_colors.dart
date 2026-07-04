@@ -6,30 +6,36 @@ class AppColors {
   AppColors._();
 
   // ── Backgrounds ──────────────────────────────────────────────────────────
-  static const Color backgroundPrimary   = Color(0xFF0F0F1A);
-  static const Color backgroundSecondary = Color(0xFF2D2D3A);
-  static const Color backgroundTertiary  = Color(0xFFF3F4F6);
+  static const Color backgroundPrimary   = Color(0xFF1A1A2E);  // logo dark
+  static const Color backgroundSecondary = Color(0xFF2D2D44);
+  static const Color backgroundTertiary  = Color(0xFFF5F5F7);
 
   // ── Text ─────────────────────────────────────────────────────────────────
   static const Color textPrimary   = Color(0xFFFFFFFF);
   static const Color textSecondary = Color(0xFF6B7280);
 
   // ── Accents ──────────────────────────────────────────────────────────────
-  static const Color accentOrange  = Color(0xFFFF6B35);
-  static const Color accentGold    = Color(0xFFFFC107);
+  static const Color accentOrange  = Color(0xFFFF8C00);  // logo golden-orange
+  static const Color accentGold    = Color(0xFFFFB800);  // logo amber gold
   static const Color successGreen  = Color(0xFF22C55E);
   static const Color errorRed      = Color(0xFFEF4444);
   static const Color infoBlue      = Color(0xFF3B82F6);
   static const Color purple        = Color(0xFF8B5CF6);
 
   // ── Effects ──────────────────────────────────────────────────────────────
-  /// rgba(255, 107, 53, 0.08)
-  static const Color cardShadowOrange = Color(0x14FF6B35);
+  /// rgba(255, 140, 0, 0.08)
+  static const Color cardShadowOrange = Color(0x14FF8C00);
 
   /// AppBar bottom 1px divider.
   static const Color appBarDivider = Color(0xFF3A3A4A);
 
   // ── Gradients ────────────────────────────────────────────────────────────
+  static const LinearGradient orangeGradient = LinearGradient(
+    colors: [accentOrange, Color(0xFFFF6B00)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
   static const LinearGradient chatGradient = LinearGradient(
     colors: [accentOrange, accentGold],
     begin: Alignment.topLeft,

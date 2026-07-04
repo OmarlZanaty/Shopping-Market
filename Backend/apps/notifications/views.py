@@ -70,9 +70,12 @@ class AdminAppSettingsBulkView(APIView):
             value = it.get('value')
             if not key:
                 continue
-            AppSettings.objects.update_or_create(
-                key=key, defaults={'value': str(value), 'description': it.get('description', '')}
-            )
+            defaults = {'value': str(value)}
+            # Only touch description when explicitly provided, so a value-only
+            # bulk update doesn't wipe the existing help text.
+            if 'description' in it:
+                defaults['description'] = it.get('description', '')
+            AppSettings.objects.update_or_create(key=key, defaults=defaults)
             updated += 1
         cache.delete(APP_SETTINGS_CACHE_KEY)
         return ok({'updated': updated})

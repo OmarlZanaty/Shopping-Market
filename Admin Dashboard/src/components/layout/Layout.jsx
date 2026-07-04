@@ -31,6 +31,7 @@ const NAV = [
   { path: '/analytics/ratings',   icon: '⭐', label_ar: 'التقييمات',        label_en: 'Ratings' },
   { path: '/analytics/points',    icon: '🏆', label_ar: 'نقاط الولاء',      label_en: 'Loyalty' },
   { divider: true, label_ar: 'الإعدادات', label_en: 'Settings' },
+  { path: '/loyalty',             icon: '⭐', label_ar: 'نقاط الولاء',       label_en: 'Loyalty' },
   { path: '/notifications',       icon: '🔔', label_ar: 'الإشعارات',        label_en: 'Notifications' },
   { path: '/admin-management',    icon: '👑', label_ar: 'المديرون',         label_en: 'Admin Management', role: 'admin' },
   { path: '/settings',            icon: '⚙️', label_ar: 'الإعدادات',        label_en: 'Settings' },
@@ -52,7 +53,7 @@ export default function Layout() {
   // Admin WebSocket — new-order push + toast.
   useEffect(() => {
     if (!token) return;
-    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://63.33.70.240:8000/api/v1';
+    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://34.124.228.3/api/v1';
     const wsBase = apiBase
       .replace('/api/v1', '')
       .replace('http://', 'ws://')

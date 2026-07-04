@@ -35,3 +35,13 @@ final orderDetailProvider =
   _scheduleAutoRefresh(ref);
   return ref.read(ordersApiProvider).get(orderId);
 });
+
+/// Server-side search by order number across the FULL dataset (not just the
+/// current page). Returns [] for an empty query so the UI can fall back to the
+/// normal "all orders" list. No auto-refresh — searches are on-demand.
+final orderSearchProvider =
+    FutureProvider.autoDispose.family<List<OrderModel>, String>((ref, query) async {
+  final q = query.trim();
+  if (q.isEmpty) return const [];
+  return ref.read(ordersApiProvider).list(search: q);
+});

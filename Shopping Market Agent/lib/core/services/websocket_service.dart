@@ -33,7 +33,9 @@ class AgentWebSocketService {
   }
 
   Future<void> _connect(String path) async {
-    final storage = const FlutterSecureStorage();
+    final storage = const FlutterSecureStorage(
+      aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    );
     final token = await storage.read(key: SecureStorageKeys.accessToken);
     final uri = Uri.parse('${ApiConstants.wsBaseUrl}$path?token=${token ?? ""}');
     try {

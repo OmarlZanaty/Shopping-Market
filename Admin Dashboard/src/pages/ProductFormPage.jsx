@@ -65,6 +65,9 @@ export default function ProductFormPage() {
       // "متاح للبيع" governs customer visibility: keep is_active in sync so an
       // available product is never left hidden (is_active=false) in the app.
       fd.append('is_active', data.is_available ? 'true' : 'false');
+      // Weight/volume units are sold by weight → customer enters grams in the
+      // app. Derive the flag from the chosen sell unit so it stays consistent.
+      fd.append('is_weight_based', ['kg', 'gram', 'liter'].includes(data.sell_unit) ? 'true' : 'false');
       if (imageFile) fd.append('main_image', imageFile);
       return isEdit ? productApi.update(id, fd) : productApi.create(fd);
     },
@@ -252,6 +255,12 @@ export default function ProductFormPage() {
                   </button>
                 ))}
               </div>
+              {['kg', 'gram', 'liter'].includes(form.sell_unit) && (
+                <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-[#2E5E99] bg-[#E7F0FA] rounded-lg px-3 py-2">
+                  <span>⚖️</span>
+                  <span>{t('يُباع بالوزن — السعر لكل كيلو، والعميل يحدد عدد الجرامات في التطبيق', 'Sold by weight — price is per kilo; customer enters grams in the app')}</span>
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className={lbl}>{t('أقل طلب', 'Min Qty')}</label><input type="number" step="0.1" value={form.min_order_quantity} onChange={e => setForm(f => ({...f, min_order_quantity: e.target.value}))} placeholder="1" className={inp} /></div>
