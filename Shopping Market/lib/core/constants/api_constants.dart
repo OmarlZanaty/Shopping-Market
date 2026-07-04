@@ -9,18 +9,14 @@ class ApiConstants {
   static String get baseUrl {
     const fromEnv = String.fromEnvironment('API_BASE_URL');
     if (fromEnv.isNotEmpty) return fromEnv;
-    return kReleaseMode
-        ? 'https://api.shopping-market.com/api/v1'
-        : 'http://34.124.228.3:8000/api/v1';
+    return 'https://63-186-157-245.sslip.io/api/v1';
   }
 
   /// WebSocket base URL.
   static String get wsBaseUrl {
     const fromEnv = String.fromEnvironment('WS_BASE_URL');
     if (fromEnv.isNotEmpty) return fromEnv;
-    return kReleaseMode
-        ? 'wss://api.shopping-market.com'
-        : 'ws://34.124.228.3:8000';
+    return 'wss://63-186-157-245.sslip.io';
   }
 
   static const Duration connectTimeout = Duration(seconds: 30);

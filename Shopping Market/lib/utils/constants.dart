@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 class AppConfig {
-  static const String baseUrl = 'http://34.124.228.3:8000/api/v1';
-  static const String wsBaseUrl = 'ws://34.124.228.3:8000';
+  static const String baseUrl = 'https://63-186-157-245.sslip.io/api/v1';
+  static const String wsBaseUrl = 'wss://63-186-157-245.sslip.io';
   static const String googleMapsApiKey = 'YOUR_GOOGLE_MAPS_API_KEY';
   static const int connectTimeout = 60000;
   static const int receiveTimeout = 60000;

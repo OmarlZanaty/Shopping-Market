@@ -12,13 +12,13 @@ class ApiConstants {
   static String get baseUrl {
     const fromEnv = String.fromEnvironment('API_BASE_URL');
     if (fromEnv.isNotEmpty) return fromEnv;
-    return 'http://34.124.228.3:8000/api/v1';
+    return 'http://63.186.157.245/api/v1';
   }
 
   static String get wsBaseUrl {
     const fromEnv = String.fromEnvironment('WS_BASE_URL');
     if (fromEnv.isNotEmpty) return fromEnv;
-    return 'ws://34.124.228.3:8000';
+    return 'ws://63.186.157.245';
   }
 
   // Auth

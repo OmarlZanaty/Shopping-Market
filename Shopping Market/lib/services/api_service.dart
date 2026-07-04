@@ -802,11 +802,7 @@ class ApiService {
   }
 
   // ─── Settings & Notifications ─────────────────────────────────────────────
-
-  Future<Map<String, dynamic>> getAppSettings() async {
-    final res = await _dio.get('/notifications/settings/');
-    return Map<String, dynamic>.from(res.data);
-  }
+  // Note: getAppSettings() is defined once above (near getStoresConfig).
 
   Future<List<Map<String, dynamic>>> getMyNotifications() async {
     final res = await _dio.get('/notifications/my/');
