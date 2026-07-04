@@ -19,9 +19,21 @@ Result shape:
 """
 from decimal import Decimal, InvalidOperation
 
+from django.db import transaction
+
 from .models import Product, Category
 
-MAX_ROWS = 5000
+MAX_ROWS = 50000
+
+# Model fields writable via import; bulk_update rewrites all of them for every
+# touched row using the instance's in-memory value (unchanged fields keep the
+# value loaded from the DB, so listing them all here is safe).
+UPDATE_FIELDS = [
+    'name_ar', 'name_en', 'description_ar', 'description_en',
+    'original_price', 'discount_price', 'cost_price',
+    'quantity_in_stock', 'low_stock_threshold', 'sell_unit',
+    'is_weight_based', 'is_available', 'image_url_s3', 'main_image',
+]
 
 # header -> model field (identity unless noted)
 COLUMNS = [
@@ -156,7 +168,14 @@ def _match_categories(names_cell, category_index):
 
 
 def run_import(rows, user, store_id, dry_run=False):
-    """Validate all rows and (unless dry_run) upsert products by barcode."""
+    """Validate all rows and (unless dry_run) upsert products by barcode.
+
+    Writes are batched: every row is validated first (no DB writes), then all
+    changes are flushed with bulk_update / bulk_create and a single pair of
+    queries for the category M2M, inside one transaction. This keeps a
+    full-catalog import (10k+ rows) well under the request/worker timeout that
+    a per-row save() loop would blow past.
+    """
     result = {'total_rows': len(rows), 'created': 0, 'updated': 0, 'errors': [], 'warnings': []}
     if len(rows) > MAX_ROWS:
         result['errors'].append({'row': 0, 'barcode': '', 'reason': f'File has {len(rows)} rows; maximum is {MAX_ROWS}'})
@@ -183,6 +202,18 @@ def run_import(rows, user, store_id, dry_run=False):
 
     barcodes = [b for b in (_cell(r, 'barcode') for r in rows) if b]
     existing = {p.barcode: p for p in product_qs.filter(barcode__in=barcodes)}
+    # Barcode is globally unique; store admins may not touch another store's.
+    other_store_barcodes = set()
+    if user_store_id is not None:
+        other_store_barcodes = set(
+            Product.objects.filter(barcode__in=barcodes)
+            .exclude(store_id=user_store_id)
+            .values_list('barcode', flat=True)
+        )
+
+    to_update = []                 # existing Product instances, mutated
+    to_create = []                 # new Product instances
+    cat_assignments = []           # (Product, [Category]) — set() semantics, applied in bulk
 
     seen = set()
     for idx, row in enumerate(rows):
@@ -203,8 +234,7 @@ def run_import(rows, user, store_id, dry_run=False):
 
             product = existing.get(barcode)
             if product is None:
-                # Barcode is globally unique — a product may exist in another store.
-                if user_store_id is not None and Product.objects.filter(barcode=barcode).exists():
+                if user_store_id is not None and barcode in other_store_barcodes:
                     raise RowError('barcode belongs to a product in another store')
                 for f in REQUIRED_FOR_CREATE:
                     if f not in updates:
@@ -215,9 +245,9 @@ def run_import(rows, user, store_id, dry_run=False):
                     product = Product(store_id=store_id, barcode=barcode, name_en=updates.get('name_en', ''))
                     for f, v in updates.items():
                         setattr(product, f, v)
-                    product.save()
+                    to_create.append(product)
                     if categories:
-                        product.categories.set(categories)
+                        cat_assignments.append((product, categories))
                 result['created'] += 1
             else:
                 if not dry_run:
@@ -226,9 +256,9 @@ def run_import(rows, user, store_id, dry_run=False):
                         product.main_image = None
                     for f, v in updates.items():
                         setattr(product, f, v)
-                    product.save()
+                    to_update.append(product)
                     if categories is not None:
-                        product.categories.set(categories)
+                        cat_assignments.append((product, categories))
                 result['updated'] += 1
 
             for name in missing:
@@ -238,8 +268,30 @@ def run_import(rows, user, store_id, dry_run=False):
                 })
         except RowError as e:
             result['errors'].append({'row': rownum, 'barcode': barcode or '', 'reason': str(e)})
-        except Exception as e:  # unexpected DB/validation failure on this row
+        except Exception as e:  # unexpected validation failure on this row
             result['errors'].append({'row': rownum, 'barcode': barcode or '', 'reason': f'unexpected error: {e}'})
+
+    if not dry_run and (to_update or to_create):
+        try:
+            with transaction.atomic():
+                if to_update:
+                    Product.objects.bulk_update(to_update, UPDATE_FIELDS, batch_size=500)
+                if to_create:
+                    Product.objects.bulk_create(to_create, batch_size=500)
+                if cat_assignments:
+                    Through = Product.categories.through
+                    pids = [p.pk for p, _ in cat_assignments]
+                    Through.objects.filter(product_id__in=pids).delete()
+                    through_rows = [
+                        Through(product_id=p.pk, category_id=c.pk)
+                        for p, cats in cat_assignments for c in cats
+                    ]
+                    if through_rows:
+                        Through.objects.bulk_create(through_rows, batch_size=1000, ignore_conflicts=True)
+        except Exception as e:  # whole batch rolled back — nothing was written
+            result['errors'].append({'row': 0, 'barcode': '', 'reason': f'bulk write failed, no changes saved: {e}'})
+            result['created'] = 0
+            result['updated'] = 0
     return result
 
 
