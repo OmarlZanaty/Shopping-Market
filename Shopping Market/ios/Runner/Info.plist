@@ -23,6 +23,14 @@
 
 	<key>NSLocationWhenInUseUsageDescription</key>
     <string>نحتاج موقعك لتحديد عنوان التوصيل</string>
+	<key>NSCameraUsageDescription</key>
+	<string>نستخدم الكاميرا لمسح الباركود والتقاط الصور</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>نحتاج الوصول للصور لرفع صورة أو مرفق</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>نستخدم Face ID لتسجيل الدخول الآمن إلى حسابك</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
@@ -49,5 +57,16 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.676476995798-05j7g2e2ta451pik1ij436fqfndah4tg</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>676476995798-05j7g2e2ta451pik1ij436fqfndah4tg.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.676476995798-05j7g2e2ta451pik1ij436fqfndah4tg</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>676476995798-ah2qog7di2iv0esq7hstt3fhv7h7vmb9.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyCNjbZm07Vj3JXZGj2nJHC_LpygX7TSwkc</string>
+	<key>GCM_SENDER_ID</key>
+	<string>676476995798</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.almobarmg.shoppingmarket</string>
+	<key>PROJECT_ID</key>
+	<string>market-fresh-105a4</string>
+	<key>STORAGE_BUCKET</key>
+	<string>market-fresh-105a4.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:676476995798:ios:3160d76855981aed2d2177</string>
+</dict>
+</plist>
