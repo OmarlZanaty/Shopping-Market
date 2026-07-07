@@ -82,3 +82,10 @@ GoogleService-Info.plist
 *.xlsx
 *.mp4
 *.mov
+
+# Exceptions: required build assets must stay tracked even though the
+# blanket *.png rule above would otherwise silently drop them from CI
+# checkouts (caused missing-app-icon rejects from App Store Connect).
+!Shopping Market/**/AppIcon.appiconset/*.png
+!Shopping Market/**/mipmap-*/ic_launcher*.png
+!Shopping Market/assets/images/logo.png
