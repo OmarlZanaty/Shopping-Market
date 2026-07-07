@@ -48,11 +48,12 @@ dependencies:
   awesome_notifications: ^0.11.0
 
   # Barcode Scanner
-  # Pinned to 5.x (not 3.x): from v4 onward mobile_scanner dropped the
-  # Firebase/GoogleMLKit pod on iOS in favor of Apple's native scanner,
-  # which resolves a GoogleDataTransport version conflict with
-  # firebase_messaging in CocoaPods (both wanted incompatible major versions).
-  mobile_scanner: ^5.2.3
+  # Pinned to 6.x: 5.x still pulls GoogleMLKit/BarcodeScanning on iOS, whose
+  # MLKitCommon requires GoogleDataTransport < 10.0 — incompatible with
+  # firebase_messaging's FirebaseMessaging, which requires >= 10.0. mobile_scanner
+  # 6.x drops the GoogleMLKit pod on iOS in favor of Apple's native AVFoundation
+  # scanner, removing the conflicting transitive dependency entirely.
+  mobile_scanner: ^6.0.2
 
   # Image
   image_picker: ^1.0.7
