@@ -238,11 +238,12 @@ class AuthProvider extends ChangeNotifier {
     String? phone,
     String? fullName,
     String? email,
+    String? token,
   }) async {
     _setLoading(true);
     try {
       final data = await _api.socialLogin(provider, socialId,
-          phone: phone, fullName: fullName, email: email);
+          phone: phone, fullName: fullName, email: email, token: token);
       _user = data['user'] is Map
           ? UserModel.fromJson(Map<String, dynamic>.from(data['user'] as Map))
           : await _api.getProfile();
@@ -343,6 +344,24 @@ class AuthProvider extends ChangeNotifier {
     //    tokens get wiped inside _api.logout() regardless of network result.
     // ignore: unawaited_futures
     _api.logout().catchError((_) {});
+  }
+
+  /// Permanently deletes the account (Guideline 5.1.1(v)). Must complete the
+  /// server call *before* clearing local state, since it needs the current
+  /// access token to authenticate the request.
+  Future<bool> deleteAccount() async {
+    try {
+      await _api.deleteAccount();
+      _user = null;
+      _status = AuthStatus.unauthenticated;
+      _error = null;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = _parseError(e);
+      notifyListeners();
+      return false;
+    }
   }
 
   void _setLoading(bool v) {

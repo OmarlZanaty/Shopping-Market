@@ -1,7 +1,10 @@
+import uuid
+
 from rest_framework import status, generics, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from django.utils import timezone
@@ -130,6 +133,44 @@ class LogoutView(APIView):
             return ok({'logged_out': True})
         except Exception:
             return fail('Invalid token', status_code=400)
+
+
+class DeleteAccountView(APIView):
+    """Guideline 5.1.1(v) — lets a signed-in user permanently delete their
+    account from within the app. We anonymize + deactivate the row rather
+    than hard-deleting it: `Order.customer`/`Order.driver` are PROTECTed FKs
+    (financial/order history must survive for accounting), so a real SQL
+    DELETE would fail anyway. Personal identifiers (name, email, phone,
+    avatar, addresses, social/biometric/FCM tokens) are wiped or replaced
+    with a non-identifying placeholder, and the account is deactivated so it
+    can no longer be signed into."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+
+        for token in OutstandingToken.objects.filter(user=user):
+            BlacklistedToken.objects.get_or_create(token=token)
+
+        Address.objects.filter(user=user).delete()
+
+        if user.avatar:
+            user.avatar.delete(save=False)
+
+        user.full_name = 'مستخدم محذوف'
+        user.email = None
+        user.avatar = None
+        user.social_id = None
+        user.biometric_token = None
+        user.fcm_token = None
+        user.phone = f'deleted_{uuid.uuid4().hex[:12]}'
+        user.is_active = False
+        user.deleted_at = timezone.now()
+        user.save(update_fields=[
+            'full_name', 'email', 'avatar', 'social_id', 'biometric_token',
+            'fcm_token', 'phone', 'is_active', 'deleted_at',
+        ])
+        return ok({'deleted': True})
 
 
 class MeView(generics.RetrieveUpdateAPIView):

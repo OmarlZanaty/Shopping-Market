@@ -219,6 +219,10 @@ FIREBASE_CREDENTIALS_PATH = config('FIREBASE_CREDENTIALS_PATH', default='firebas
 # Path to Firebase service account JSON used by firebase-admin for Phone Auth token verification
 FIREBASE_SERVICE_ACCOUNT_JSON = config('FIREBASE_SERVICE_ACCOUNT_JSON', default='firebase-credentials.json')
 
+# Sign in with Apple — identity tokens are verified against Apple's JWKS and
+# must have one of these bundle IDs as their `aud` claim.
+APPLE_BUNDLE_IDS = config('APPLE_BUNDLE_IDS', default='com.almobarmg.shoppingmarket', cast=Csv())
+
 # Payment Gateways
 PAYMOB_API_KEY = config('PAYMOB_API_KEY', default='')
 PAYMOB_INTEGRATION_ID = config('PAYMOB_INTEGRATION_ID', default='')

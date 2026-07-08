@@ -397,13 +397,14 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> socialLogin(String provider, String socialId,
-      {String? phone, String? fullName, String? email}) async {
+      {String? phone, String? fullName, String? email, String? token}) async {
     try {
       final res = await _dio.post('/auth/social/', data: {
         'provider': provider, 'social_id': socialId,
         if (phone != null) 'phone': phone,
         if (fullName != null) 'full_name': fullName,
         if (email != null) 'email': email,
+        if (token != null) 'token': token,
       });
       final m = Map<String, dynamic>.from(_unwrap(res.data) ?? res.data);
       await _saveTokens(m['access'], m['refresh']);
@@ -465,6 +466,18 @@ class ApiService {
         validateStatus: (_) => true, // never throw on status code
       ));
       await plain.post('/auth/logout/', data: {'refresh': refresh});
+    } catch (_) {}
+  }
+
+  /// Permanently deletes the signed-in user's account (Guideline 5.1.1(v)).
+  /// Must be called while still authenticated — the server blacklists all
+  /// outstanding tokens and anonymizes the account. Callers should wipe local
+  /// storage and navigate to the login screen immediately after this
+  /// succeeds, since the access token becomes invalid server-side.
+  Future<void> deleteAccount() async {
+    await _dio.post('/auth/delete-account/');
+    try {
+      await _storage.deleteAll();
     } catch (_) {}
   }
 

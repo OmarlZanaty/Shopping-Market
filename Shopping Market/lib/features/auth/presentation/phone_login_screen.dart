@@ -1,8 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_colors.dart';
@@ -182,6 +185,13 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 const SizedBox(height: 24),
                 _socialDivider(),
                 const SizedBox(height: 16),
+                if (Platform.isIOS) ...[
+                  _socialButton(
+                    label: 'الدخول بحساب Apple',
+                    onTap: _appleSignIn,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 _socialButton(
                   label: 'الدخول بحساب Google',
                   onTap: _googleSignIn,
@@ -307,6 +317,48 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     }
   }
 
+  /// Apple only returns the user's name on the very first authorization —
+  /// the backend verifies `identityToken` itself (see apple_auth.py) rather
+  /// than trusting a client-supplied id, so `socialId` here is just a
+  /// fallback the server ignores once it decodes the token.
+  Future<void> _appleSignIn() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+    try {
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: const [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+      );
+      final fullName = [credential.givenName, credential.familyName]
+          .where((s) => s != null && s.isNotEmpty)
+          .join(' ');
+      await _completeSocialLogin(
+        provider: 'apple',
+        socialId: credential.userIdentifier ?? '',
+        email: credential.email,
+        fullName: fullName.isNotEmpty ? fullName : null,
+        token: credential.identityToken,
+      );
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      if (e.code == AuthorizationErrorCode.canceled) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('تعذّر تسجيل الدخول عبر Apple'),
+        backgroundColor: AppColors.errorRed,
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('تعذّر تسجيل الدخول عبر Apple'),
+        backgroundColor: AppColors.errorRed,
+      ));
+    }
+  }
+
   /// Sends the provider profile to the backend. New social users must supply a
   /// phone number, so on the backend's "phone required" response we prompt for
   /// one and retry. On success we route to the home screen.
@@ -316,6 +368,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     String? email,
     String? fullName,
     String? phone,
+    String? token,
   }) async {
     final auth = context.read<AuthProvider>();
     final result = await auth.handleSocialLogin(
@@ -324,6 +377,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       email: email,
       fullName: fullName,
       phone: phone,
+      token: token,
     );
     if (!mounted) return;
 
@@ -345,6 +399,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
           email: email,
           fullName: fullName,
           phone: entered,
+          token: token,
         );
         return;
       case SocialLoginResult.failed:

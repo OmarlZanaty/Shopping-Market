@@ -36,6 +36,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         OTP = 'otp', _('OTP')
         GOOGLE = 'google', _('Google')
         FACEBOOK = 'facebook', _('Facebook')
+        APPLE = 'apple', _('Apple')
         BIOMETRIC = 'biometric', _('Biometric')
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -82,6 +83,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     is_blocked = models.BooleanField(default=False)
     block_reason = models.TextField(blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
     biometric_token = models.CharField(max_length=500, blank=True, null=True)
     fcm_token = models.CharField(max_length=500, blank=True, null=True)
 

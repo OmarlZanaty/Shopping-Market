@@ -314,6 +314,25 @@ class ProfileScreen extends StatelessWidget {
                   onPressed: () => _confirmLogout(context, auth),
                 ),
               ),
+              const SizedBox(height: 12),
+
+              // Delete account button
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.delete_forever_rounded,
+                      color: AppColors.textMuted, size: 20),
+                  label: const Text('حذف الحساب نهائياً',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontFamily: 'Cairo',
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      )),
+                  onPressed: () => _confirmDeleteAccount(context, auth),
+                ),
+              ),
               const SizedBox(height: 30),
             ]),
           ),
@@ -501,6 +520,61 @@ class ProfileScreen extends StatelessWidget {
               auth.logout();
             },
             child: const Text('خروج',
+                style: TextStyle(
+                    fontFamily: 'Cairo',
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteAccount(BuildContext context, AuthProvider auth) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('حذف الحساب نهائياً',
+            style: TextStyle(
+              fontFamily: 'Cairo',
+              fontWeight: FontWeight.w800,
+              color: AppColors.textMain,
+            )),
+        content: const Text(
+          'سيتم حذف بياناتك الشخصية (الاسم، البريد الإلكتروني، العناوين) نهائياً ولن '
+          'تتمكن من تسجيل الدخول بهذا الحساب مرة أخرى. سجل طلباتك السابقة يُحتفظ به '
+          'بشكل مجهول لأغراض محاسبية فقط. هل تريد المتابعة؟',
+          style: TextStyle(fontFamily: 'Cairo', color: AppColors.textMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('إلغاء',
+                style:
+                    TextStyle(fontFamily: 'Cairo', color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              Navigator.pop(dialogCtx);
+              final ok = await auth.deleteAccount();
+              if (!ok && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(auth.error ?? 'تعذّر حذف الحساب'),
+                  backgroundColor: AppColors.error,
+                ));
+              }
+              // On success auth.deleteAccount() flips status to
+              // unauthenticated synchronously — GoRouter's refreshListenable
+              // redirects away, same as logout().
+            },
+            child: const Text('حذف نهائياً',
                 style: TextStyle(
                     fontFamily: 'Cairo',
                     color: Colors.white,

@@ -20,6 +20,7 @@ urlpatterns = [
     path('biometric/register/', views.BiometricRegisterView.as_view(), name='biometric-register'),
     path('biometric/login/', views.BiometricLoginView.as_view(), name='biometric-login'),
     path('logout/', views.LogoutView.as_view(), name='logout'),
+    path('delete-account/', views.DeleteAccountView.as_view(), name='delete-account'),
     path('refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('token/refresh/', TokenRefreshView.as_view()),  # back-compat
 

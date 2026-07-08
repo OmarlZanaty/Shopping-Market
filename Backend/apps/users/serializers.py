@@ -103,16 +103,31 @@ class StaffLoginSerializer(serializers.Serializer):
 
 
 class SocialLoginSerializer(serializers.Serializer):
-    provider = serializers.ChoiceField(choices=['google', 'facebook'])
+    provider = serializers.ChoiceField(choices=['google', 'facebook', 'apple'])
     token = serializers.CharField(required=False, allow_blank=True)  # provider OAuth token
-    social_id = serializers.CharField()
+    social_id = serializers.CharField(required=False, allow_blank=True)
     full_name = serializers.CharField(required=False)
     email = serializers.EmailField(required=False)
     phone = serializers.CharField(required=False)
 
     def validate(self, data):
-        social_id = data.get('social_id')
         provider = data.get('provider')
+
+        if provider == 'apple':
+            # Apple's identity must be verified server-side (Guideline 4.8) —
+            # never trust a client-supplied social_id/email for this provider.
+            from .apple_auth import verify_apple_identity_token, AppleTokenError
+            try:
+                claims = verify_apple_identity_token(data.get('token', ''))
+            except AppleTokenError as e:
+                raise serializers.ValidationError({'token': str(e)})
+            data['social_id'] = claims['sub']
+            if claims.get('email'):
+                data['email'] = claims['email']
+        elif not data.get('social_id'):
+            raise serializers.ValidationError({'social_id': 'This field is required.'})
+
+        social_id = data.get('social_id')
         try:
             user = User.objects.get(social_id=social_id, login_type=provider)
             data['user'] = user
