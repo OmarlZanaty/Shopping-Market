@@ -13,7 +13,11 @@ class NotificationService {
   final _fcm = FirebaseMessaging.instance;
 
   Future<void> init() async {
-    await _fcm.requestPermission(alert: true, badge: true, sound: true);
+    try {
+      await _fcm.requestPermission(alert: true, badge: true, sound: true);
+    } catch (_) {
+      // Permission prompt can throw on some iOS states — non-fatal.
+    }
 
     await AwesomeNotifications().initialize(
       null,
@@ -61,16 +65,30 @@ class NotificationService {
       onActionReceivedMethod: _onActionReceived,
     );
 
-    final token = await _fcm.getToken();
-    if (token != null) {
-      _onTokenRefresh(token);
-    } else {
-      // Fresh installs can return null while FCM is still registering the
-      // device. Retry once shortly — otherwise this device never sends a token
-      // to the backend and silently receives no pushes.
+    // On iOS getToken() can throw (apns-token-not-set) or hang until the APNS
+    // token is registered. Guard it so it can never crash notification init.
+    try {
+      final token = await _fcm.getToken();
+      if (token != null) {
+        _onTokenRefresh(token);
+      } else {
+        // Fresh installs can return null while FCM is still registering the
+        // device. Retry once shortly — otherwise this device never sends a
+        // token to the backend and silently receives no pushes.
+        Future.delayed(const Duration(seconds: 5), () async {
+          try {
+            final t = await _fcm.getToken();
+            if (t != null) _onTokenRefresh(t);
+          } catch (_) {}
+        });
+      }
+    } catch (_) {
+      // Retry later once APNS is ready; never block or crash startup.
       Future.delayed(const Duration(seconds: 5), () async {
-        final t = await _fcm.getToken();
-        if (t != null) _onTokenRefresh(t);
+        try {
+          final t = await _fcm.getToken();
+          if (t != null) _onTokenRefresh(t);
+        } catch (_) {}
       });
     }
     _fcm.onTokenRefresh.listen(_onTokenRefresh);

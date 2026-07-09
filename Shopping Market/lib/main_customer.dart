@@ -24,9 +24,14 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase
-  await Firebase.initializeApp();
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  // Initialize Firebase. Guarded so a Firebase/config failure can never stop
+  // the app from launching (would otherwise leave a blank screen).
+  try {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  } catch (_) {
+    // App still runs without push; features degrade gracefully.
+  }
 
   // Initialize API service
   ApiService().init();
@@ -38,14 +43,19 @@ void main() async {
     LoyaltyConfig.applySettings(s);
   }).catchError((_) {});
 
-  // Initialize notifications
-  await NotificationService().init();
+  // Initialize notifications — fire-and-forget. On iOS, FirebaseMessaging
+  // .getToken() can hang or throw until an APNS token is available; awaiting it
+  // here previously blocked runApp() and produced a blank launch screen on some
+  // devices (App Store review rejection 2.1). Never block startup on it.
+  NotificationService().init().catchError((_) {});
 
-  // Lock orientation
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+  // Lock orientation. Guarded — must never prevent runApp().
+  try {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+  } catch (_) {}
 
   // Status bar style — matches spec backgroundPrimary.
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
