@@ -38,10 +38,23 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   }
 
   void _validate(String value) {
+    final local = _toLocalNumber(value);
     setState(() {
-      _phoneError = Validators.egyptianPhone(value);
-      _isValid = _phoneError == null && value.isNotEmpty;
+      _phoneError = Validators.egyptianPhone(local);
+      _isValid = _phoneError == null && local.isNotEmpty;
     });
+  }
+
+  /// Normalises whatever the user typed into the canonical 11-digit local form
+  /// (01XXXXXXXXX). Accepts a bare local number, or the full international form
+  /// (+201XXXXXXXXX / 201XXXXXXXXX / 00201XXXXXXXXX) — the latter matters for
+  /// App Review, whose sign-in notes hand the reviewer the full +20 number.
+  String _toLocalNumber(String raw) {
+    var d = raw.replaceAll(RegExp(r'\D'), ''); // digits only
+    if (d.startsWith('0020')) d = d.substring(4);
+    if (d.startsWith('20') && d.length >= 12) d = d.substring(2);
+    if (d.isNotEmpty && !d.startsWith('0')) d = '0$d';
+    return d;
   }
 
   Future<void> _submit() async {
@@ -49,9 +62,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
 
-    final localNumber = _phoneController.text.trim();
+    final localNumber = _toLocalNumber(_phoneController.text);
     // Firebase expects E.164 format: +20XXXXXXXXXX
-    // Egyptian numbers: 01XXXXXXXXX → strip leading 0 → +201XXXXXXXXX
+    // Egyptian numbers: 01XXXXXXXXX → +2 + local → +201XXXXXXXXX
     final e164 = '+2$localNumber';
 
     await FirebaseAuth.instance.verifyPhoneNumber(
@@ -196,12 +209,35 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                   label: 'الدخول بحساب Google',
                   onTap: _googleSignIn,
                 ),
+                const SizedBox(height: 20),
+                // Guest browsing — required by App Store guideline 5.1.1(v):
+                // features that aren't account-based (browsing products) must
+                // be reachable without registering or logging in.
+                TextButton(
+                  onPressed: _isLoading ? null : _continueAsGuest,
+                  child: const Text(
+                    'تصفّح بدون تسجيل الدخول',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// Enters the app as a guest so products can be browsed without an account.
+  /// Account-based routes (cart checkout, orders, profile) still redirect to
+  /// login via the router's guest guard.
+  void _continueAsGuest() {
+    context.read<AuthProvider>().browseAsGuest();
+    context.go('/home');
   }
 
   Widget _buildPhoneField() {
@@ -238,7 +274,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
             child: TextFormField(
               controller: _phoneController,
               keyboardType: TextInputType.phone,
-              maxLength: 11,
+              maxLength: 15,
               textAlign: TextAlign.left,
               textDirection: TextDirection.ltr,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
