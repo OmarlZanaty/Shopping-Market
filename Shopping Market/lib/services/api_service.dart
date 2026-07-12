@@ -60,7 +60,15 @@ class ApiService {
             path.contains('/auth/refresh/') ||
             path.contains('/auth/token/refresh/');
 
-        if (e.response?.statusCode == 401 && !isAuthEndpoint) {
+        // A 401 on a request that never carried a token (guest browsing, or any
+        // call made before login) isn't a "session expired" — there was no
+        // session to expire. Treat it as a plain error and let the caller's
+        // own try/catch handle it; don't refresh or force a logout, which
+        // would incorrectly downgrade a guest to unauthenticated and bounce
+        // them out of the app.
+        final hadToken = e.requestOptions.headers.containsKey('Authorization');
+
+        if (e.response?.statusCode == 401 && !isAuthEndpoint && hadToken) {
           final refreshed = await _refreshToken();
           if (refreshed) {
             // Retry with the new access token

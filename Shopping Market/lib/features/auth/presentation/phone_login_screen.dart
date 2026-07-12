@@ -67,36 +67,49 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     // Egyptian numbers: 01XXXXXXXXX → +2 + local → +201XXXXXXXXX
     final e164 = '+2$localNumber';
 
-    await FirebaseAuth.instance.verifyPhoneNumber(
-      phoneNumber: e164,
-      timeout: const Duration(seconds: 60),
-      verificationCompleted: (PhoneAuthCredential credential) async {
-        // Android auto-retrieval — sign in immediately without user input.
-        await _signInWithCredential(credential, localNumber);
-      },
-      verificationFailed: (FirebaseAuthException e) {
-        if (!mounted) return;
-        setState(() => _isLoading = false);
-        // ignore: avoid_print — temporary until the real Play Integrity/billing
-        // cause is confirmed; e.code alone ("unknown") hides the actual reason.
-        print('verifyPhoneNumber failed — code: ${e.code}, plugin: ${e.plugin}, message: ${e.message}');
-        final msg = _friendlyError(e.code);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('$msg\n${e.message ?? ""}'),
-          backgroundColor: AppColors.errorRed,
-        ));
-      },
-      codeSent: (String verificationId, int? resendToken) {
-        if (!mounted) return;
-        setState(() => _isLoading = false);
-        context.push('/otp', extra: {
-          'phone': localNumber,
-          'verificationId': verificationId,
-          'resendToken': resendToken,
-        });
-      },
-      codeAutoRetrievalTimeout: (String verificationId) {},
-    );
+    try {
+      await FirebaseAuth.instance.verifyPhoneNumber(
+        phoneNumber: e164,
+        timeout: const Duration(seconds: 60),
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          // Android auto-retrieval — sign in immediately without user input.
+          await _signInWithCredential(credential, localNumber);
+        },
+        verificationFailed: (FirebaseAuthException e) {
+          if (!mounted) return;
+          setState(() => _isLoading = false);
+          // ignore: avoid_print — temporary until the real Play Integrity/billing
+          // cause is confirmed; e.code alone ("unknown") hides the actual reason.
+          print('verifyPhoneNumber failed — code: ${e.code}, plugin: ${e.plugin}, message: ${e.message}');
+          final msg = _friendlyError(e.code);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('$msg\n${e.message ?? ""}'),
+            backgroundColor: AppColors.errorRed,
+          ));
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          if (!mounted) return;
+          setState(() => _isLoading = false);
+          context.push('/otp', extra: {
+            'phone': localNumber,
+            'verificationId': verificationId,
+            'resendToken': resendToken,
+          });
+        },
+        codeAutoRetrievalTimeout: (String verificationId) {},
+      );
+    } catch (e) {
+      // verifyPhoneNumber itself threw before any callback fired (e.g. a
+      // platform-level config error) — without this, _isLoading would stay
+      // true forever and the button would look permanently stuck.
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      print('verifyPhoneNumber threw synchronously: $e');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('تعذّر إرسال الكود، حاول مرة أخرى\n$e'),
+        backgroundColor: AppColors.errorRed,
+      ));
+    }
   }
 
   /// Android auto-retrieval path: Firebase reads the SMS itself and hands us a
