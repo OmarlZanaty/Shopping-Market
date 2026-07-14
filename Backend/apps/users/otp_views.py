@@ -194,7 +194,7 @@ class FirebaseTokenLoginView(APIView):
             try:
                 firebase_admin.get_app()
             except ValueError:
-                cred_path = getattr(settings, 'FIREBASE_SERVICE_ACCOUNT_JSON', None)
+                cred_path = getattr(settings, 'FIREBASE_CREDENTIALS_PATH', None)
                 if cred_path:
                     cred = fb_creds.Certificate(cred_path)
                 else:

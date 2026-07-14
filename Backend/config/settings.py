@@ -215,9 +215,13 @@ if USE_S3:
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ── External services ────────────────────────────────────────────────────────
+# Single service-account path, used both for FCM push (apps/notifications) and
+# for verifying Firebase Phone Auth ID tokens (apps/users/otp_views.py). These
+# used to be two separate settings keys (FIREBASE_CREDENTIALS_PATH and
+# FIREBASE_SERVICE_ACCOUNT_JSON) — only the former was ever set via .env, so
+# the latter silently fell back to a relative default instead of sharing the
+# real configured path.
 FIREBASE_CREDENTIALS_PATH = config('FIREBASE_CREDENTIALS_PATH', default='firebase-credentials.json')
-# Path to Firebase service account JSON used by firebase-admin for Phone Auth token verification
-FIREBASE_SERVICE_ACCOUNT_JSON = config('FIREBASE_SERVICE_ACCOUNT_JSON', default='firebase-credentials.json')
 
 # Sign in with Apple — identity tokens are verified against Apple's JWKS and
 # must have one of these bundle IDs as their `aud` claim.

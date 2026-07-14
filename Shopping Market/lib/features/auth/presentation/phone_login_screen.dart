@@ -67,6 +67,12 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     // Egyptian numbers: 01XXXXXXXXX → +2 + local → +201XXXXXXXXX
     final e164 = '+2$localNumber';
 
+    await _startVerification(e164, localNumber);
+  }
+
+  /// [retried] guards against looping forever if the APNs handshake keeps failing.
+  Future<void> _startVerification(String e164, String localNumber,
+      {bool retried = false}) async {
     try {
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: e164,
@@ -75,7 +81,20 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
           // Android auto-retrieval — sign in immediately without user input.
           await _signInWithCredential(credential, localNumber);
         },
-        verificationFailed: (FirebaseAuthException e) {
+        verificationFailed: (FirebaseAuthException e) async {
+          // iOS-only: on a fresh install, Firebase Auth's one-time APNs
+          // silent-push handshake can fire before the device's push token has
+          // finished registering with Apple, throwing this even though the
+          // app/Firebase/APNs config is all correct. Retrying once — by which
+          // point the token has almost always arrived — resolves it silently
+          // instead of dead-ending the user (this is exactly what blocked App
+          // Review's login attempt with the demo account).
+          if (!retried && e.code == 'notification-not-forwarded') {
+            await Future.delayed(const Duration(seconds: 2));
+            if (!mounted) return;
+            await _startVerification(e164, localNumber, retried: true);
+            return;
+          }
           if (!mounted) return;
           setState(() => _isLoading = false);
           // ignore: avoid_print — temporary until the real Play Integrity/billing

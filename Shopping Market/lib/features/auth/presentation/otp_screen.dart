@@ -87,8 +87,8 @@ class _OtpScreenState extends State<OtpScreen>
     });
   }
 
-  Future<void> _resend() async {
-    if (_resendIn > 0) return;
+  Future<void> _resend({bool retried = false}) async {
+    if (!retried && _resendIn > 0) return;
     final e164 = '+2${widget.phone}';
     await FirebaseAuth.instance.verifyPhoneNumber(
       phoneNumber: e164,
@@ -97,7 +97,15 @@ class _OtpScreenState extends State<OtpScreen>
       verificationCompleted: (credential) async {
         await _verifyCredential(credential);
       },
-      verificationFailed: (e) {
+      verificationFailed: (e) async {
+        // Same transient iOS APNs-handshake race as the initial send — see
+        // phone_login_screen.dart's _startVerification for details.
+        if (!retried && e.code == 'notification-not-forwarded') {
+          await Future.delayed(const Duration(seconds: 2));
+          if (!mounted) return;
+          await _resend(retried: true);
+          return;
+        }
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('فشل إعادة الإرسال: ${e.code}'),
