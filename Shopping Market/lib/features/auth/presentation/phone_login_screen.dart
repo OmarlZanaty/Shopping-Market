@@ -76,7 +76,10 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     try {
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: e164,
-        timeout: const Duration(seconds: 60),
+        // Short enough that a reviewer/user isn't left staring at a spinner
+        // for a full minute if the iOS silent-push app-verification never
+        // arrives; codeAutoRetrievalTimeout below always resolves it.
+        timeout: const Duration(seconds: 20),
         verificationCompleted: (PhoneAuthCredential credential) async {
           // Android auto-retrieval — sign in immediately without user input.
           await _signInWithCredential(credential, localNumber);
@@ -115,7 +118,19 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
             'resendToken': resendToken,
           });
         },
-        codeAutoRetrievalTimeout: (String verificationId) {},
+        codeAutoRetrievalTimeout: (String verificationId) {
+          // Fires when Firebase's auto-retrieval window elapses without
+          // codeSent/verificationFailed ever being called (e.g. the iOS
+          // silent APNs push never arrived). Left empty, this stranded
+          // _isLoading at true forever — the exact "activity indicator
+          // spun indefinitely at sign-in" bug App Review reported.
+          if (!mounted) return;
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('انتهت مهلة الإرسال، حاول مرة أخرى'),
+            backgroundColor: AppColors.errorRed,
+          ));
+        },
       );
     } catch (e) {
       // verifyPhoneNumber itself threw before any callback fired (e.g. a

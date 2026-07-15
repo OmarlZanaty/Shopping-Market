@@ -93,7 +93,7 @@ class _OtpScreenState extends State<OtpScreen>
     await FirebaseAuth.instance.verifyPhoneNumber(
       phoneNumber: e164,
       forceResendingToken: _resendToken,
-      timeout: const Duration(seconds: 60),
+      timeout: const Duration(seconds: 20),
       verificationCompleted: (credential) async {
         await _verifyCredential(credential);
       },
@@ -124,7 +124,17 @@ class _OtpScreenState extends State<OtpScreen>
           backgroundColor: AppColors.successGreen,
         ));
       },
-      codeAutoRetrievalTimeout: (_) {},
+      codeAutoRetrievalTimeout: (_) {
+        // Same gap as phone_login_screen.dart's _startVerification: if this
+        // fires without codeSent/verificationFailed ever having run, let the
+        // user retry instead of leaving the resend silently dead-ended.
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('انتهت مهلة إعادة الإرسال، حاول مرة أخرى'),
+          backgroundColor: AppColors.errorRed,
+        ));
+        _startResendCountdown();
+      },
     );
   }
 
