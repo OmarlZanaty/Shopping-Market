@@ -17,10 +17,14 @@ workflows:
       vars:
         BUNDLE_ID: "com.almobarmg.shoppingmarket"
       flutter: stable
-      # Pin Xcode to a stable release. `latest` (Xcode 26 / Swift 6 toolchain)
-      # fails with "Using bridging headers with module interfaces is unsupported".
-      # 16.4 still ships the iOS 18 SDK required for App Store submission.
-      xcode: 16.4
+      # Xcode 16.4 (iOS 18.5 SDK) is no longer accepted by App Store Connect —
+      # Apple now requires the iOS 26 SDK (Xcode 26+) for all new uploads
+      # (upload of build 16 rejected with "SDK version issue" 409). `latest`
+      # was previously avoided because Swift Package Manager's module
+      # interfaces clashed with this app's bridging header, but SPM is
+      # already disabled below (`flutter config --no-enable-swift-package-manager`),
+      # so that failure mode shouldn't apply here.
+      xcode: latest
       cocoapods: default
     scripts:
       - name: Get Flutter packages
