@@ -14,6 +14,15 @@ workflows:
       # run a pre-flight "fetch existing profiles" that fails on a fresh account
       # ("No matching profiles found"). Instead we create the cert+profile in
       # the "Set up code signing" script below via the App Store Connect API key.
+      #
+      # `ios_signing` (Codemagic env var group, unrelated to the
+      # `ios_signing:` keyword above) supplies IOS_DIST_CERT_KEY — a
+      # persistent private key so every build reuses the same Distribution
+      # certificate instead of minting a new one each run. Without it we hit
+      # Apple's 2-certificate cap after a few builds ("You already have a
+      # current Distribution certificate or a pending certificate request").
+      groups:
+        - ios_signing
       vars:
         BUNDLE_ID: "com.almobarmg.shoppingmarket"
       flutter: stable
