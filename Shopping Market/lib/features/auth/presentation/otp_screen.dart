@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 
 import 'package:provider/provider.dart';
@@ -147,22 +148,72 @@ class _OtpScreenState extends State<OtpScreen>
     });
     FocusScope.of(context).unfocus();
 
-    final credential = PhoneAuthProvider.credential(
-      verificationId: _verificationId,
-      smsCode: code,
-    );
-    await _verifyCredential(credential);
+    await _verifyCredential(null);
   }
 
-  /// The full sign-in exchange: Firebase credential → our Django JWT → user.
-  /// Kept as one unit so [_verifyCredential] can bound the *whole* chain with a
-  /// single timeout — any individual step stalling must not strand the spinner.
+  /// Exchanges the entered code for a Firebase ID token over Firebase's REST
+  /// API instead of `signInWithCredential`.
+  ///
+  /// WHY NOT THE PLUGIN: on iOS, `signInWithCredential`/`getIdToken` never
+  /// return. Firebase's own console records the sign-in as successful, yet the
+  /// Dart future never completes, so `firebaseTokenLogin` below is never
+  /// reached — the production nginx log shows `POST /auth/firebase-token/` was
+  /// not called ONCE between 2026-07-04 and 2026-07-16, across six App Review
+  /// attempts, while `/auth/social/` and `/auth/refresh/` from the same app
+  /// succeeded throughout. That is the "activity indicator spun indefinitely"
+  /// bug: not APNs, not verifyPhoneNumber (which works — it uses an
+  /// EventChannel, not the Pigeon method channel these two calls go through).
+  ///
+  /// `verificationId` is exactly the `sessionInfo` this endpoint expects — it's
+  /// the same token the native SDKs post here internally.
+  Future<String> _fetchIdTokenViaRest(String code) async {
+    final apiKey = Firebase.app().options.apiKey;
+    final res = await Dio().post(
+      'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPhoneNumber',
+      queryParameters: {'key': apiKey},
+      data: {'sessionInfo': _verificationId, 'code': code},
+      options: Options(
+        contentType: Headers.jsonContentType,
+        // Read errors ourselves so Firebase's own code (INVALID_CODE,
+        // SESSION_EXPIRED) survives instead of becoming a bare DioException.
+        validateStatus: (_) => true,
+      ),
+    );
+
+    final body = res.data is Map ? Map<String, dynamic>.from(res.data) : {};
+    final idToken = body['idToken'];
+    if (idToken is String && idToken.isNotEmpty) return idToken;
+
+    final reason = (body['error']?['message'] ?? '').toString();
+    if (reason.startsWith('INVALID_CODE')) {
+      throw FirebaseAuthException(code: 'invalid-verification-code');
+    }
+    if (reason.startsWith('SESSION_EXPIRED')) {
+      throw FirebaseAuthException(code: 'session-expired');
+    }
+    throw FirebaseAuthException(
+        code: reason.isEmpty ? 'unknown' : reason.toLowerCase());
+  }
+
+  /// The full sign-in exchange: code → Firebase ID token → our Django JWT →
+  /// user. Kept as one unit so [_verifyCredential] can bound the *whole* chain
+  /// with a single timeout — any step stalling must not strand the spinner.
+  ///
+  /// [credential] is non-null only on Android's auto-retrieval path, where the
+  /// SDK hands us a ready credential and the native call is known to work.
   Future<({UserModel user, bool isNew})> _signInAndFetchUser(
-      PhoneAuthCredential credential) async {
-    // 1. Verify with Firebase
-    final result = await FirebaseAuth.instance.signInWithCredential(credential);
-    final idToken = await result.user?.getIdToken();
-    if (idToken == null) throw Exception('Firebase token missing');
+      PhoneAuthCredential? credential) async {
+    // 1. Get a Firebase ID token
+    final String idToken;
+    if (credential != null) {
+      final result =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+      final token = await result.user?.getIdToken();
+      if (token == null) throw Exception('Firebase token missing');
+      idToken = token;
+    } else {
+      idToken = await _fetchIdTokenViaRest(_code);
+    }
 
     // 2. Exchange Firebase ID token for our Django JWT
     final res = await ApiService().firebaseTokenLogin(
@@ -179,7 +230,7 @@ class _OtpScreenState extends State<OtpScreen>
     return (user: user, isNew: res['is_new_user'] == true);
   }
 
-  Future<void> _verifyCredential(PhoneAuthCredential credential) async {
+  Future<void> _verifyCredential(PhoneAuthCredential? credential) async {
     try {
       // App Review rejected builds 15 and 16 with "the activity indicator spun
       // indefinitely when we attempted to sign in", screenshotting THIS screen
