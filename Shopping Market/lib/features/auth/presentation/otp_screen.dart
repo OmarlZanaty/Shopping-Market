@@ -125,15 +125,11 @@ class _OtpScreenState extends State<OtpScreen>
         ));
       },
       codeAutoRetrievalTimeout: (_) {
-        // Same gap as phone_login_screen.dart's _startVerification: if this
-        // fires without codeSent/verificationFailed ever having run, let the
-        // user retry instead of leaving the resend silently dead-ended.
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('انتهت مهلة إعادة الإرسال، حاول مرة أخرى'),
-          backgroundColor: AppColors.errorRed,
-        ));
-        _startResendCountdown();
+        // Android-only, and NOT an error — it only means the SMS auto-read
+        // window closed, which is expected whenever the user types the code
+        // themselves. It fires ~20s after a successful codeSent, so reporting
+        // "resend timed out" here (as build 16 did) contradicts the "code
+        // resent" confirmation the user just saw. See phone_login_screen.dart.
       },
     );
   }
@@ -158,38 +154,61 @@ class _OtpScreenState extends State<OtpScreen>
     await _verifyCredential(credential);
   }
 
+  /// The full sign-in exchange: Firebase credential → our Django JWT → user.
+  /// Kept as one unit so [_verifyCredential] can bound the *whole* chain with a
+  /// single timeout — any individual step stalling must not strand the spinner.
+  Future<({UserModel user, bool isNew})> _signInAndFetchUser(
+      PhoneAuthCredential credential) async {
+    // 1. Verify with Firebase
+    final result = await FirebaseAuth.instance.signInWithCredential(credential);
+    final idToken = await result.user?.getIdToken();
+    if (idToken == null) throw Exception('Firebase token missing');
+
+    // 2. Exchange Firebase ID token for our Django JWT
+    final res = await ApiService().firebaseTokenLogin(
+      idToken: idToken,
+      phone: widget.phone,
+    );
+
+    // 3. Resolve the user. /auth/firebase-token/ does return a `user` object
+    // today, but fall back to fetching the profile if a deploy ever drops it.
+    final UserModel user = res['user'] is Map
+        ? UserModel.fromJson(Map<String, dynamic>.from(res['user']))
+        : await ApiService().getProfile();
+
+    return (user: user, isNew: res['is_new_user'] == true);
+  }
+
   Future<void> _verifyCredential(PhoneAuthCredential credential) async {
     try {
-      // 1. Verify with Firebase
-      final result =
-          await FirebaseAuth.instance.signInWithCredential(credential);
-      final idToken = await result.user?.getIdToken();
-      if (idToken == null) throw Exception('Firebase token missing');
-
-      // 2. Exchange Firebase ID token for our Django JWT
-      final res = await ApiService().firebaseTokenLogin(
-        idToken: idToken,
-        phone: widget.phone,
-      );
-
-      // 3. Persist user data + update AuthProvider so router unlocks.
-      // The /auth/firebase-token/ response only returns {access, refresh,
-      // is_new_user} — there is NO `user` object. The tokens are already
-      // saved inside firebaseTokenLogin(), so fetch the profile to populate
-      // AuthProvider. (Previously we threw 'Invalid user data' here, which
-      // blocked login from completing even though the tokens had persisted —
-      // the user kept landing back on the OTP screen.)
-      final UserModel user = res['user'] is Map
-          ? UserModel.fromJson(Map<String, dynamic>.from(res['user']))
-          : await ApiService().getProfile();
+      // App Review rejected builds 15 and 16 with "the activity indicator spun
+      // indefinitely when we attempted to sign in", screenshotting THIS screen
+      // with the code filled in. Firebase's own console confirms the reviewer's
+      // credential sign-in succeeded, and every backend hop responds in <1s, so
+      // the stall was a client-side future that simply never completed — which
+      // no try/catch can catch. Bounding the whole chain guarantees the spinner
+      // always resolves into either a login or a retryable error.
+      final outcome = await _signInAndFetchUser(credential)
+          .timeout(const Duration(seconds: 30));
 
       if (!mounted) return;
-      // setAuthenticated is now async (persists to storage) — await it so
-      // the user data is saved before we navigate.
-      await context.read<app_auth.AuthProvider>().setAuthenticated(user);
+      // setAuthenticated persists to storage — await it so the user data is
+      // saved before we navigate.
+      await context.read<app_auth.AuthProvider>().setAuthenticated(outcome.user);
 
-      final isNew = res['is_new_user'] == true;
-      context.go(isNew ? '/profile-complete' : '/home');
+      if (!mounted) return;
+      context.go(outcome.isNew ? '/profile-complete' : '/home');
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() {
+        _hasError = true;
+        _isVerifying = false;
+      });
+      _shake.forward(from: 0).whenComplete(() => _shake.reverse());
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('تعذّر إكمال تسجيل الدخول، تحقّق من اتصالك وحاول مرة أخرى'),
+        backgroundColor: AppColors.errorRed,
+      ));
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -277,7 +296,11 @@ class _OtpScreenState extends State<OtpScreen>
               ),
               const SizedBox(height: 4),
               Text(
-                '+20${widget.phone}',
+                // phone is the 11-digit local form (01XXXXXXXXX) whose leading
+                // 0 IS the country code's trailing 0, so the prefix is '+2' —
+                // matching the e164 built for Firebase above. '+20' printed
+                // +2001000000099 back at App Review, a number that never existed.
+                '+2${widget.phone}',
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,

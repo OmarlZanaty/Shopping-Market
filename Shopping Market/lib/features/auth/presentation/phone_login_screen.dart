@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -30,11 +31,38 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   bool _isLoading = false;
   String? _phoneError;
   bool _isValid = false;
+  Timer? _watchdog;
 
   @override
   void dispose() {
+    _watchdog?.cancel();
     _phoneController.dispose();
     super.dispose();
+  }
+
+  /// Guarantees this screen's spinner always resolves.
+  ///
+  /// On iOS, `verifyPhoneNumber` can stall without ever invoking *any* of its
+  /// callbacks — the native handler (FLTPhoneNumberVerificationStreamHandler.m)
+  /// only emits `phoneCodeSent`/`phoneVerificationFailed` from FIRPhoneAuthProvider's
+  /// completion block, so if that block never runs nothing fires at all.
+  /// `codeAutoRetrievalTimeout` cannot rescue it: only Android's handler emits
+  /// that event, and the `timeout:` argument is ignored on iOS entirely — so
+  /// there is no SDK-level guarantee that `_isLoading` ever clears.
+  ///
+  /// This screen is not the one App Review screenshotted (that was the OTP
+  /// screen — see otp_screen.dart's _verifyCredential), but the same class of
+  /// stall applies here, so bound it too.
+  void _startWatchdog() {
+    _watchdog?.cancel();
+    _watchdog = Timer(const Duration(seconds: 25), () {
+      if (!mounted || !_isLoading) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('تعذّر إرسال الكود، تحقّق من اتصالك وحاول مرة أخرى'),
+        backgroundColor: AppColors.errorRed,
+      ));
+    });
   }
 
   void _validate(String value) {
@@ -73,18 +101,21 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   /// [retried] guards against looping forever if the APNs handshake keeps failing.
   Future<void> _startVerification(String e164, String localNumber,
       {bool retried = false}) async {
+    _startWatchdog();
     try {
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: e164,
-        // Short enough that a reviewer/user isn't left staring at a spinner
-        // for a full minute if the iOS silent-push app-verification never
-        // arrives; codeAutoRetrievalTimeout below always resolves it.
+        // Android-only: how long to wait for SMS auto-retrieval. Ignored on iOS
+        // (see _startWatchdog), which is why the watchdog above — not this — is
+        // what guarantees the spinner resolves.
         timeout: const Duration(seconds: 20),
         verificationCompleted: (PhoneAuthCredential credential) async {
           // Android auto-retrieval — sign in immediately without user input.
+          _watchdog?.cancel();
           await _signInWithCredential(credential, localNumber);
         },
         verificationFailed: (FirebaseAuthException e) async {
+          _watchdog?.cancel();
           // iOS-only: on a fresh install, Firebase Auth's one-time APNs
           // silent-push handshake can fire before the device's push token has
           // finished registering with Apple, throwing this even though the
@@ -110,6 +141,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
           ));
         },
         codeSent: (String verificationId, int? resendToken) {
+          _watchdog?.cancel();
           if (!mounted) return;
           setState(() => _isLoading = false);
           context.push('/otp', extra: {
@@ -119,23 +151,19 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
           });
         },
         codeAutoRetrievalTimeout: (String verificationId) {
-          // Fires when Firebase's auto-retrieval window elapses without
-          // codeSent/verificationFailed ever being called (e.g. the iOS
-          // silent APNs push never arrived). Left empty, this stranded
-          // _isLoading at true forever — the exact "activity indicator
-          // spun indefinitely at sign-in" bug App Review reported.
-          if (!mounted) return;
-          setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('انتهت مهلة الإرسال، حاول مرة أخرى'),
-            backgroundColor: AppColors.errorRed,
-          ));
+          // Android-only, and NOT an error: it just means the SMS auto-read
+          // window closed and the user should type the code themselves. It
+          // fires ~20s after codeSent has already pushed the OTP screen, so
+          // surfacing a failure here (as build 16 did) shows a bogus "sending
+          // timed out" error over a working OTP screen. The watchdog covers
+          // the genuine "nothing ever resolved" case on both platforms.
         },
       );
     } catch (e) {
       // verifyPhoneNumber itself threw before any callback fired (e.g. a
       // platform-level config error) — without this, _isLoading would stay
       // true forever and the button would look permanently stuck.
+      _watchdog?.cancel();
       if (!mounted) return;
       setState(() => _isLoading = false);
       print('verifyPhoneNumber threw synchronously: $e');

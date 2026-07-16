@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../utils/constants.dart';
 import '../models/models.dart';
@@ -45,55 +46,82 @@ class ApiService {
             options.headers['Authorization'] = 'Bearer $token';
           }
         } catch (_) {
-          // Corrupt storage — ignore and proceed unauthenticated.
-          await _storage.deleteAll();
+          // Corrupt storage — ignore and proceed unauthenticated. deleteAll()
+          // must itself be guarded: if it throws (iOS Keychain errors surface
+          // here), the exception escapes this async callback, handler.next is
+          // never reached, and Dio's request future NEVER completes — no
+          // timeout, no error, just a spinner that hangs forever.
+          try {
+            await _storage.deleteAll();
+          } catch (_) {}
         }
         return handler.next(options);
       },
       onError: (e, handler) async {
-        // Don't try to refresh on auth endpoints (login, register, social…)
-        final path = e.requestOptions.path;
-        final isAuthEndpoint = path.contains('/auth/login/') ||
-            path.contains('/auth/register/') ||
-            path.contains('/auth/social-login/') ||
-            path.contains('/auth/biometric/') ||
-            path.contains('/auth/refresh/') ||
-            path.contains('/auth/token/refresh/');
-
-        // A 401 on a request that never carried a token (guest browsing, or any
-        // call made before login) isn't a "session expired" — there was no
-        // session to expire. Treat it as a plain error and let the caller's
-        // own try/catch handle it; don't refresh or force a logout, which
-        // would incorrectly downgrade a guest to unauthenticated and bounce
-        // them out of the app.
-        final hadToken = e.requestOptions.headers.containsKey('Authorization');
-
-        if (e.response?.statusCode == 401 && !isAuthEndpoint && hadToken) {
-          final refreshed = await _refreshToken();
-          if (refreshed) {
-            // Retry with the new access token
-            final token = await _storage.read(key: StorageKeys.accessToken);
-            e.requestOptions.headers['Authorization'] = 'Bearer $token';
-            try {
-              final retry = await _dio.fetch(e.requestOptions);
-              return handler.resolve(retry);
-            } catch (retryErr) {
-              return handler.next(e);
-            }
-          } else {
-            // Refresh failed — tokens are gone; notify the app to log out.
-            onUnauthorized?.call();
-          }
+        // The handler is called here and only here, exactly once. Anything
+        // thrown while deciding (a storage read, the refresh call) would
+        // otherwise escape this async callback before the handler ran, leaving
+        // the caller awaiting a future that never completes.
+        Response? retried;
+        try {
+          retried = await _recoverFrom401(e);
+        } catch (_) {
+          retried = null;
         }
-        return handler.next(e);
+        return retried != null ? handler.resolve(retried) : handler.next(e);
       },
     ));
 
-    _dio.interceptors.add(LogInterceptor(
-      requestBody: true,
-      responseBody: true,
-      logPrint: (obj) => print('[API] $obj'),
-    ));
+    // Debug builds only. This logs full request/response bodies, which on the
+    // login path means Firebase ID tokens and both JWTs get written to the
+    // device log of every shipped install — and it puts a synchronous print of
+    // several KB in front of every response the UI is awaiting.
+    if (kDebugMode) {
+      _dio.interceptors.add(LogInterceptor(
+        requestBody: true,
+        responseBody: true,
+        logPrint: (obj) => debugPrint('[API] $obj'),
+      ));
+    }
+  }
+
+  /// Decides how to handle a failed request, WITHOUT touching the interceptor
+  /// handler — returns the retried [Response] on a successful token refresh, or
+  /// null to let the original error propagate. Keeping the handler out of here
+  /// is what lets the caller guarantee it runs exactly once.
+  Future<Response?> _recoverFrom401(DioException e) async {
+    // Don't try to refresh on auth endpoints (login, register, social…)
+    final path = e.requestOptions.path;
+    final isAuthEndpoint = path.contains('/auth/login/') ||
+        path.contains('/auth/register/') ||
+        path.contains('/auth/social-login/') ||
+        path.contains('/auth/biometric/') ||
+        path.contains('/auth/refresh/') ||
+        path.contains('/auth/token/refresh/');
+
+    // A 401 on a request that never carried a token (guest browsing, or any
+    // call made before login) isn't a "session expired" — there was no
+    // session to expire. Treat it as a plain error and let the caller's
+    // own try/catch handle it; don't refresh or force a logout, which
+    // would incorrectly downgrade a guest to unauthenticated and bounce
+    // them out of the app.
+    final hadToken = e.requestOptions.headers.containsKey('Authorization');
+    if (e.response?.statusCode != 401 || isAuthEndpoint || !hadToken) return null;
+
+    if (!await _refreshToken()) {
+      // Refresh failed — tokens are gone; notify the app to log out.
+      onUnauthorized?.call();
+      return null;
+    }
+
+    // Retry with the new access token
+    final token = await _storage.read(key: StorageKeys.accessToken);
+    e.requestOptions.headers['Authorization'] = 'Bearer $token';
+    try {
+      return await _dio.fetch(e.requestOptions);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// In-flight refresh, shared so concurrent 401s perform ONE refresh.

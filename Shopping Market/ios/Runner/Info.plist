@@ -71,6 +71,20 @@
 				<string>com.googleusercontent.apps.676476995798-05j7g2e2ta451pik1ij436fqfndah4tg</string>
 			</array>
 		</dict>
+		<!-- Firebase Phone Auth reCAPTCHA fallback. When the APNs silent-push app
+		     check can't complete, FirebaseAuth verifies the app via a reCAPTCHA web
+		     flow that redirects back through this scheme: GOOGLE_APP_ID from
+		     GoogleService-Info.plist with ':' replaced by '-'. Without it the flow
+		     has no way back into the app and verifyPhoneNumber's completion never
+		     runs, hanging sign-in (App Review 2.1(a), builds 15 & 16). -->
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>app-1-676476995798-ios-3160d76855981aed2d2177</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
