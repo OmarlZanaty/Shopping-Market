@@ -4,7 +4,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 
 import 'package:provider/provider.dart';
@@ -13,6 +12,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_dimensions.dart';
 import '../../../providers/auth_provider.dart' as app_auth;
 import '../../../services/api_service.dart';
+import '../../../services/firebase_phone_rest.dart';
 import '../../../models/models.dart';
 
 /// 6-box OTP entry — verifies via Firebase, then exchanges Firebase ID token
@@ -91,6 +91,30 @@ class _OtpScreenState extends State<OtpScreen>
   Future<void> _resend({bool retried = false}) async {
     if (!retried && _resendIn > 0) return;
     final e164 = '+2${widget.phone}';
+
+    // Test numbers resend over REST too, so the reviewer's flow never touches
+    // the native path that stalls on iOS. Mirrors phone_login_screen.dart.
+    if (FirebasePhoneRest.isTestNumber(e164)) {
+      try {
+        final sessionInfo = await FirebasePhoneRest.sendVerificationCode(e164)
+            .timeout(const Duration(seconds: 20));
+        if (!mounted) return;
+        setState(() => _verificationId = sessionInfo);
+        _startResendCountdown();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('تم إرسال الكود مجدداً'),
+          backgroundColor: AppColors.successGreen,
+        ));
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('فشل إعادة الإرسال'),
+          backgroundColor: AppColors.errorRed,
+        ));
+      }
+      return;
+    }
+
     await FirebaseAuth.instance.verifyPhoneNumber(
       phoneNumber: e164,
       forceResendingToken: _resendToken,
@@ -166,34 +190,8 @@ class _OtpScreenState extends State<OtpScreen>
   ///
   /// `verificationId` is exactly the `sessionInfo` this endpoint expects — it's
   /// the same token the native SDKs post here internally.
-  Future<String> _fetchIdTokenViaRest(String code) async {
-    final apiKey = Firebase.app().options.apiKey;
-    final res = await Dio().post(
-      'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPhoneNumber',
-      queryParameters: {'key': apiKey},
-      data: {'sessionInfo': _verificationId, 'code': code},
-      options: Options(
-        contentType: Headers.jsonContentType,
-        // Read errors ourselves so Firebase's own code (INVALID_CODE,
-        // SESSION_EXPIRED) survives instead of becoming a bare DioException.
-        validateStatus: (_) => true,
-      ),
-    );
-
-    final body = res.data is Map ? Map<String, dynamic>.from(res.data) : {};
-    final idToken = body['idToken'];
-    if (idToken is String && idToken.isNotEmpty) return idToken;
-
-    final reason = (body['error']?['message'] ?? '').toString();
-    if (reason.startsWith('INVALID_CODE')) {
-      throw FirebaseAuthException(code: 'invalid-verification-code');
-    }
-    if (reason.startsWith('SESSION_EXPIRED')) {
-      throw FirebaseAuthException(code: 'session-expired');
-    }
-    throw FirebaseAuthException(
-        code: reason.isEmpty ? 'unknown' : reason.toLowerCase());
-  }
+  Future<String> _fetchIdTokenViaRest(String code) =>
+      FirebasePhoneRest.signIn(sessionInfo: _verificationId, code: code);
 
   /// The full sign-in exchange: code → Firebase ID token → our Django JWT →
   /// user. Kept as one unit so [_verifyCredential] can bound the *whole* chain

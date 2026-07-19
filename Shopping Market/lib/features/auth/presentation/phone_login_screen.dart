@@ -15,6 +15,7 @@ import '../../../core/utils/validators.dart';
 import '../../../models/models.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../services/api_service.dart';
+import '../../../services/firebase_phone_rest.dart';
 
 /// Customer phone login — uses Firebase Phone Auth to send OTP.
 /// The phone number is formatted as +20XXXXXXXXXX before being sent.
@@ -102,6 +103,36 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   Future<void> _startVerification(String e164, String localNumber,
       {bool retried = false}) async {
     _startWatchdog();
+
+    // Firebase test numbers (App Review's demo account) are allowlisted and
+    // need no reCAPTCHA/APNs, so send the code over REST and skip the native
+    // `verifyPhoneNumber` entirely — that native call is the one that stalls on
+    // iOS and produced the "sign-in spinner spins forever" rejections. Real
+    // numbers fall through to the SDK below because they still require reCAPTCHA.
+    if (FirebasePhoneRest.isTestNumber(e164)) {
+      try {
+        final sessionInfo = await FirebasePhoneRest.sendVerificationCode(e164)
+            .timeout(const Duration(seconds: 20));
+        _watchdog?.cancel();
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        context.push('/otp', extra: {
+          'phone': localNumber,
+          'verificationId': sessionInfo,
+          'resendToken': null,
+        });
+      } catch (e) {
+        _watchdog?.cancel();
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('تعذّر إرسال الكود، حاول مرة أخرى\n$e'),
+          backgroundColor: AppColors.errorRed,
+        ));
+      }
+      return;
+    }
+
     try {
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: e164,

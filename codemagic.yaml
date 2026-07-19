@@ -46,6 +46,23 @@ workflows:
           flutter pub get
       - name: Install CocoaPods dependencies
         script: find . -name "Podfile" -execdir pod install \;
+      - name: iOS sign-in regression test (real iOS runtime, no device needed)
+        script: |
+          # Guards against a repeat of the App Review 2.1(a) rejections
+          # (builds 13-18): the phone-sign-in hang only ever showed up on iOS,
+          # never in Android testing, so "verified on Android" kept shipping
+          # builds that failed again in front of App Review. This runs the
+          # actual sign-in chain (integration_test/ios_phone_signin_test.dart)
+          # on an iOS Simulator — same Dart engine and platform channels as a
+          # physical device, just without needing one. A hang or failure here
+          # stops the workflow before code signing / IPA build / TestFlight
+          # publish, so a broken build never reaches App Review.
+          UDID=$(xcrun simctl list devices available | grep -m1 "iPhone" | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
+          if [ -z "$UDID" ]; then
+            echo "No iPhone simulator available on this image" && exit 1
+          fi
+          xcrun simctl boot "$UDID" || true
+          flutter test integration_test/ios_phone_signin_test.dart -d "$UDID"
       - name: Set up code signing (create cert + profile)
         script: |
           keychain initialize
