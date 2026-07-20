@@ -64,6 +64,15 @@ workflows:
           # either ("Unable to find a destination matching..."). Create a
           # fresh device from Xcode's own device type + runtime lists, so
           # it's guaranteed to be a combination Xcode itself considers valid.
+          # Restart CoreSimulatorService before creating the device: builds
+          # 24/27 both showed xcodebuild's destination resolver rejecting a
+          # UDID that `simctl` itself reports as freshly created and booted
+          # ("Unable to find a destination matching..." even for a device we
+          # just made) — a known symptom of CoreSimulatorService holding a
+          # stale device-set snapshot from before the device existed.
+          launchctl remove com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
+          killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
+          sleep 2
           DEVICE_TYPE_ID=$(xcrun simctl list devicetypes | grep -m1 -E "iPhone 1[5-9]" | sed -E 's/.*\(([^)]+)\)/\1/')
           [ -z "$DEVICE_TYPE_ID" ] && DEVICE_TYPE_ID=$(xcrun simctl list devicetypes | grep -m1 "iPhone" | sed -E 's/.*\(([^)]+)\)/\1/')
           RUNTIME_ID=$(xcrun simctl list runtimes | grep "iOS " | tail -1 | awk '{print $NF}')
@@ -71,6 +80,10 @@ workflows:
           UDID=$(xcrun simctl create "CI-iPhone" "$DEVICE_TYPE_ID" "$RUNTIME_ID")
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
+          # Force the destination resolver to re-enumerate before xcodebuild
+          # runs, rather than trusting it already knows about $UDID.
+          xcrun simctl list devices | grep "$UDID"
+          xcodebuild -showdestinations -scheme Runner -workspace ios/Runner.xcworkspace 2>&1 | grep -A2 "$UDID" || true
           flutter test integration_test/ios_phone_signin_test.dart -d "$UDID"
       - name: Capture authentic iOS status bar reference (Guideline 2.3.10 fix)
         script: |
