@@ -135,7 +135,15 @@ workflows:
           xcrun simctl install "$UDID" "$APP_PATH"
           BUNDLE_ID_INSTALLED=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP_PATH/Info.plist")
           xcrun simctl launch "$UDID" "$BUNDLE_ID_INSTALLED"
-          sleep 8
+          # `simctl launch` returns as soon as it's told springboard to
+          # launch, not once the app is actually on screen — 8s wasn't
+          # enough for a Flutter debug build's first cold launch in a fresh
+          # simulator and the capture landed on the Home Screen mid-install
+          # instead of the app. Wait longer and launch a second time in case
+          # the first attempt raced the install finishing.
+          sleep 20
+          xcrun simctl launch "$UDID" "$BUNDLE_ID_INSTALLED" || true
+          sleep 10
           mkdir -p /tmp/status_bar_reference
           xcrun simctl io "$UDID" screenshot /tmp/status_bar_reference/ios_status_bar_reference.png
           xcrun simctl terminate "$UDID" "$BUNDLE_ID_INSTALLED" || true
