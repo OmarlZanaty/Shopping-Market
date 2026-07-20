@@ -57,13 +57,21 @@ workflows:
           # physical device, just without needing one. A hang or failure here
           # stops the workflow before code signing / IPA build / TestFlight
           # publish, so a broken build never reaches App Review.
-          # Let Flutter resolve and boot the simulator itself rather than
-          # hand-picking a UDID from `simctl list devices available` — that
-          # list includes device/runtime combos Xcode's destination resolver
-          # won't accept ("Unable to find a destination matching..."),
-          # because flutter's own device matching is guaranteed compatible
-          # with its own build pipeline.
-          flutter test integration_test/ios_phone_signin_test.dart -d "iPhone"
+          # This build image ships Xcode's device types/runtimes but no
+          # pre-created simulator *instance* — `-d "iPhone"` found nothing,
+          # and a UDID scraped from a stale `simctl list devices available`
+          # entry wasn't recognized by xcodebuild's destination resolver
+          # either ("Unable to find a destination matching..."). Create a
+          # fresh device from Xcode's own device type + runtime lists, so
+          # it's guaranteed to be a combination Xcode itself considers valid.
+          DEVICE_TYPE_ID=$(xcrun simctl list devicetypes | grep -m1 -E "iPhone 1[5-9]" | sed -E 's/.*\(([^)]+)\)/\1/')
+          [ -z "$DEVICE_TYPE_ID" ] && DEVICE_TYPE_ID=$(xcrun simctl list devicetypes | grep -m1 "iPhone" | sed -E 's/.*\(([^)]+)\)/\1/')
+          RUNTIME_ID=$(xcrun simctl list runtimes | grep "iOS " | tail -1 | sed -E 's/.*\(([^)]+)\) - .*/\1/')
+          echo "Using device type: $DEVICE_TYPE_ID, runtime: $RUNTIME_ID"
+          UDID=$(xcrun simctl create "CI-iPhone" "$DEVICE_TYPE_ID" "$RUNTIME_ID")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          flutter test integration_test/ios_phone_signin_test.dart -d "$UDID"
       - name: Capture authentic iOS status bar reference (Guideline 2.3.10 fix)
         script: |
           # App Review's 2.3.10 rejection: the App Store marketing screenshots
@@ -75,15 +83,22 @@ workflows:
           # illustrated ones — the 5 marketing templates turned out to use
           # different phone-frame geometry each, so compositing a real status
           # bar onto them isn't a safe pixel-for-pixel operation.
-          # Reuse whatever simulator the previous step already booted via
-          # Flutter's own device resolution (see that step's comment for why
-          # we don't hand-pick a UDID from `simctl list devices available`).
+          # Reuse whatever simulator the previous step already created and
+          # booted (env vars don't persist between Codemagic script steps,
+          # so re-query "booted" state rather than reading $UDID directly).
+          # Fall back to creating a fresh one the same way if none is booted
+          # — see the regression-test step's comment for why we create a
+          # device from Xcode's own device type + runtime lists instead of
+          # hand-picking a UDID from `simctl list devices available`.
           UDID=$(xcrun simctl list devices booted | grep -m1 "iPhone" | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
           if [ -z "$UDID" ]; then
-            echo "No booted iPhone simulator found — falling back to boot one directly"
-            UDID=$(xcrun simctl list devices available | grep -m1 "iPhone" | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
-            [ -z "$UDID" ] && echo "No iPhone simulator available on this image" && exit 1
-            xcrun simctl boot "$UDID" || true
+            echo "No booted iPhone simulator found — creating one"
+            DEVICE_TYPE_ID=$(xcrun simctl list devicetypes | grep -m1 -E "iPhone 1[5-9]" | sed -E 's/.*\(([^)]+)\)/\1/')
+            [ -z "$DEVICE_TYPE_ID" ] && DEVICE_TYPE_ID=$(xcrun simctl list devicetypes | grep -m1 "iPhone" | sed -E 's/.*\(([^)]+)\)/\1/')
+            RUNTIME_ID=$(xcrun simctl list runtimes | grep "iOS " | tail -1 | sed -E 's/.*\(([^)]+)\) - .*/\1/')
+            UDID=$(xcrun simctl create "CI-iPhone-2" "$DEVICE_TYPE_ID" "$RUNTIME_ID")
+            xcrun simctl boot "$UDID"
+            xcrun simctl bootstatus "$UDID" -b
           fi
           xcrun simctl status_bar "$UDID" override \
             --time "9:41" \
