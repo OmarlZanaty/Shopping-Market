@@ -57,26 +57,34 @@ workflows:
           # physical device, just without needing one. A hang or failure here
           # stops the workflow before code signing / IPA build / TestFlight
           # publish, so a broken build never reaches App Review.
-          UDID=$(xcrun simctl list devices available | grep -m1 "iPhone" | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
-          if [ -z "$UDID" ]; then
-            echo "No iPhone simulator available on this image" && exit 1
-          fi
-          xcrun simctl boot "$UDID" || true
-          flutter test integration_test/ios_phone_signin_test.dart -d "$UDID"
+          # Let Flutter resolve and boot the simulator itself rather than
+          # hand-picking a UDID from `simctl list devices available` — that
+          # list includes device/runtime combos Xcode's destination resolver
+          # won't accept ("Unable to find a destination matching..."),
+          # because flutter's own device matching is guaranteed compatible
+          # with its own build pipeline.
+          flutter test integration_test/ios_phone_signin_test.dart -d "iPhone"
       - name: Capture authentic iOS status bar reference (Guideline 2.3.10 fix)
         script: |
           # App Review's 2.3.10 rejection: the App Store marketing screenshots
           # use an illustrated status bar (hand-drawn signal/wifi/battery
           # icons) instead of a genuine iOS render — "non-iOS status bar
           # images". Capture a real iOS Simulator screenshot with the
-          # standard App Store status bar (9:41, full signal/wifi/battery) so
-          # it can be composited over the illustrated one in the marketing
-          # template, pixel-for-pixel, without touching the rest of the design.
-          UDID=$(xcrun simctl list devices available | grep -m1 "iPhone" | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
+          # standard App Store status bar (9:41, full signal/wifi/battery) to
+          # use directly as an App Store screenshot in place of the flagged
+          # illustrated ones — the 5 marketing templates turned out to use
+          # different phone-frame geometry each, so compositing a real status
+          # bar onto them isn't a safe pixel-for-pixel operation.
+          # Reuse whatever simulator the previous step already booted via
+          # Flutter's own device resolution (see that step's comment for why
+          # we don't hand-pick a UDID from `simctl list devices available`).
+          UDID=$(xcrun simctl list devices booted | grep -m1 "iPhone" | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
           if [ -z "$UDID" ]; then
-            echo "No iPhone simulator available on this image" && exit 1
+            echo "No booted iPhone simulator found — falling back to boot one directly"
+            UDID=$(xcrun simctl list devices available | grep -m1 "iPhone" | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
+            [ -z "$UDID" ] && echo "No iPhone simulator available on this image" && exit 1
+            xcrun simctl boot "$UDID" || true
           fi
-          xcrun simctl boot "$UDID" || true
           xcrun simctl status_bar "$UDID" override \
             --time "9:41" \
             --dataNetwork wifi --wifiMode active --wifiBars 3 \
