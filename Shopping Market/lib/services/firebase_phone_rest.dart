@@ -35,20 +35,29 @@ class FirebasePhoneRest {
   // runtime from the loaded Firebase app, never hardcode it.
   static String get _key => Firebase.app().options.apiKey;
 
-  /// Requests an SMS code and returns the `sessionInfo` — which is exactly the
-  /// SDK's `verificationId`, the token [signIn] expects. For test numbers no
-  /// real SMS is sent; the console-configured code applies.
-  static Future<String> sendVerificationCode(String e164) async {
-    final res = await Dio().post(
-      '$_base:sendVerificationCode',
-      queryParameters: {'key': _key},
-      data: {'phoneNumber': e164},
-      options: Options(
+  /// A Dio with explicit, short timeouts. A bare `Dio()` has NO connect/receive
+  /// timeout, so a stalled TLS/socket on the review device would hang until the
+  /// OTP screen's outer 30s cap fired — 30s of spinner reads as "spins
+  /// indefinitely" to App Review. Bounding each request to 12s turns that into a
+  /// fast, retryable error instead. Both endpoints normally answer in <0.5s.
+  static Dio _dio() => Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 12),
+        sendTimeout: const Duration(seconds: 12),
+        receiveTimeout: const Duration(seconds: 12),
         contentType: Headers.jsonContentType,
         // Read Firebase's own error codes ourselves instead of letting a
         // non-2xx become a bare DioException.
         validateStatus: (_) => true,
-      ),
+      ));
+
+  /// Requests an SMS code and returns the `sessionInfo` — which is exactly the
+  /// SDK's `verificationId`, the token [signIn] expects. For test numbers no
+  /// real SMS is sent; the console-configured code applies.
+  static Future<String> sendVerificationCode(String e164) async {
+    final res = await _dio().post(
+      '$_base:sendVerificationCode',
+      queryParameters: {'key': _key},
+      data: {'phoneNumber': e164},
     );
     final body = res.data is Map ? Map<String, dynamic>.from(res.data) : {};
     final sessionInfo = body['sessionInfo'];
@@ -61,14 +70,10 @@ class FirebasePhoneRest {
     required String sessionInfo,
     required String code,
   }) async {
-    final res = await Dio().post(
+    final res = await _dio().post(
       '$_base:signInWithPhoneNumber',
       queryParameters: {'key': _key},
       data: {'sessionInfo': sessionInfo, 'code': code},
-      options: Options(
-        contentType: Headers.jsonContentType,
-        validateStatus: (_) => true,
-      ),
     );
     final body = res.data is Map ? Map<String, dynamic>.from(res.data) : {};
     final idToken = body['idToken'];
