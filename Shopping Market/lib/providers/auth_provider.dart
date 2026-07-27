@@ -280,11 +280,20 @@ class AuthProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
     // Persist for offline fallback — must be valid JSON (not Map.toString()).
+    //
+    // Bounded on purpose: the auth state above is already live, so this write is
+    // only an offline-cache nicety. On iOS a Keychain write can block without
+    // ever returning or throwing, and callers `await` this method before
+    // navigating — that is what left App Review's OTP spinner running forever
+    // after a sign-in that had already succeeded. A hang here must cost a cache
+    // entry, never the login.
     try {
-      await _storage.write(
-        key: StorageKeys.userData,
-        value: jsonEncode(user.toJson()),
-      );
+      await _storage
+          .write(
+            key: StorageKeys.userData,
+            value: jsonEncode(user.toJson()),
+          )
+          .timeout(const Duration(seconds: 5));
     } catch (_) {} // storage failure must never break the login flow
     _pushFcmToken();
   }

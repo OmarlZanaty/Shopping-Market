@@ -230,20 +230,30 @@ class _OtpScreenState extends State<OtpScreen>
 
   Future<void> _verifyCredential(PhoneAuthCredential? credential) async {
     try {
-      // App Review rejected builds 15 and 16 with "the activity indicator spun
-      // indefinitely when we attempted to sign in", screenshotting THIS screen
-      // with the code filled in. Firebase's own console confirms the reviewer's
-      // credential sign-in succeeded, and every backend hop responds in <1s, so
-      // the stall was a client-side future that simply never completed — which
-      // no try/catch can catch. Bounding the whole chain guarantees the spinner
-      // always resolves into either a login or a retryable error.
+      // App Review rejected builds 15, 16, 18 and 19 with "the activity
+      // indicator spun indefinitely when we attempted to sign in",
+      // screenshotting THIS screen with the code filled in. Every earlier fix
+      // bounded a step *inside* this call — and by build 19 Firebase, the token
+      // exchange and the backend all provably completed in under a second. What
+      // was left was the step AFTER it: `setAuthenticated` writes to the iOS
+      // Keychain, that write is not covered by the timeout below, and the
+      // success path never cleared `_isVerifying`. A Keychain write that never
+      // returns therefore left this spinner running forever, with the login
+      // already succeeded server-side and no error to show — exactly the
+      // reviewer's report. Persistence is now bounded too (and is only an
+      // offline-cache nicety), and the `finally` guarantees the spinner stops
+      // no matter which step misbehaves.
       final outcome = await _signInAndFetchUser(credential)
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 20));
 
       if (!mounted) return;
-      // setAuthenticated persists to storage — await it so the user data is
-      // saved before we navigate.
-      await context.read<app_auth.AuthProvider>().setAuthenticated(outcome.user);
+      // Best-effort: persist for the offline fallback, but never let it block
+      // navigation. The session tokens themselves were already saved by
+      // firebaseTokenLogin, so a failure here costs nothing but a cache entry.
+      await context
+          .read<app_auth.AuthProvider>()
+          .setAuthenticated(outcome.user)
+          .timeout(const Duration(seconds: 5), onTimeout: () {});
 
       if (!mounted) return;
       context.go(outcome.isNew ? '/profile-complete' : '/home');
@@ -283,6 +293,11 @@ class _OtpScreenState extends State<OtpScreen>
         content: Text(_friendlyApiError(e)),
         backgroundColor: AppColors.errorRed,
       ));
+    } finally {
+      // Last line of defence: whatever happened above — including an early
+      // `return` on an unmounted widget or a future that resolved in an
+      // unexpected order — this screen must never be left spinning.
+      if (mounted && _isVerifying) setState(() => _isVerifying = false);
     }
   }
 
