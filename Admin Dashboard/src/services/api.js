@@ -159,3 +159,15 @@ export const branchApi = {
   update: (id, data) => api.patch(`/branches/admin/${id}/`, data),
   delete: (id) => api.delete(`/branches/admin/${id}/`),
 };
+
+// Delivery zones: polygons that replace the branch's delivery_radius_km circle.
+// A branch with no zones keeps using its radius, so this is purely additive.
+export const zoneApi = {
+  list: (branchId) => api.get('/branches/admin/zones/', { params: { branch_id: branchId } }),
+  create: (data) => api.post('/branches/admin/zones/', data),
+  update: (id, data) => api.patch(`/branches/admin/zones/${id}/`, data),
+  delete: (id) => api.delete(`/branches/admin/zones/${id}/`),
+  fromRadius: (branchId, data = {}) =>
+    api.post(`/branches/admin/${branchId}/zone-from-radius/`, data),
+  check: (lat, lng) => api.get('/branches/coverage/', { params: { lat, lng } }),
+};

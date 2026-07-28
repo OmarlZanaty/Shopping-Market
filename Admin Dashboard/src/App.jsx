@@ -20,6 +20,7 @@ const BannersPage        = lazy(() => import('./pages/BannersPage'));
 const MediaLibraryPage   = lazy(() => import('./pages/MediaLibraryPage'));
 const LiveMapPage        = lazy(() => import('./pages/LiveMapPage'));
 const BranchesPage       = lazy(() => import('./pages/BranchesPage'));
+const DeliveryZonesPage  = lazy(() => import('./pages/DeliveryZonesPage'));
 const NotificationsPage  = lazy(() => import('./pages/NotificationsPage'));
 const SettingsPage       = lazy(() => import('./pages/SettingsPage'));
 const LoyaltyPage        = lazy(() => import('./pages/LoyaltyPage'));
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="banners"               element={<S><BannersPage /></S>} />
             <Route path="media"                 element={<S><MediaLibraryPage /></S>} />
             <Route path="branches"              element={<S><BranchesPage /></S>} />
+            <Route path="delivery-zones"        element={<S><DeliveryZonesPage /></S>} />
             <Route path="notifications"         element={<S><NotificationsPage /></S>} />
             <Route path="settings"              element={<S><SettingsPage /></S>} />
             <Route path="loyalty"               element={<S><LoyaltyPage /></S>} />
