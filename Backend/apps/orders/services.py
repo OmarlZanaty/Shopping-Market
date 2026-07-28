@@ -6,6 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import Order, OrderItem, OrderAdjustment
+from apps.branches.coverage import OUT_OF_ZONE_AR, is_covered
 from apps.products.models import Product
 from apps.users.models import Address, WalletTransaction, PointsTransaction
 from apps.notifications.models import AppSettings
@@ -46,8 +47,12 @@ def create_customer_order(customer, payload):
         _floor_number      = payload.get('floor_number', '')
         _apartment_number  = payload.get('apartment_number', '')
         _landmark          = payload.get('landmark', '')
-        _delivery_lat      = None
-        _delivery_lng      = None
+        # Inline orders historically carried no coordinates, which left the
+        # delivery-zone check blind to them. Optional, so older app builds keep
+        # working; when present the zone check applies exactly as it does to a
+        # saved address.
+        _delivery_lat      = payload.get('latitude')
+        _delivery_lng      = payload.get('longitude')
         _delivery_name     = payload.get('delivery_name', '') or customer.full_name
         _delivery_phone    = payload.get('delivery_phone', '') or customer.phone
 
@@ -62,6 +67,14 @@ def create_customer_order(customer, payload):
     except Product.DoesNotExist:
         raise OrderError('First product not found')
     store_id = first_product.store_id
+
+    # Delivery coverage. Skipped when the payload carries no coordinates —
+    # older app builds send inline addresses without them, and rejecting those
+    # would block real customers over a missing field rather than a real
+    # out-of-area address.
+    if _delivery_lat is not None and _delivery_lng is not None:
+        if not is_covered(_delivery_lat, _delivery_lng, store_id=store_id):
+            raise OrderError(OUT_OF_ZONE_AR)
 
     # Validate every product is in the same store + available + sufficient stock
     product_ids = [it['product_id'] for it in items_data]

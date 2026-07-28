@@ -151,6 +151,12 @@ class OrderCreateSerializer(serializers.Serializer):
     floor_number     = serializers.CharField(required=False, allow_blank=True, default='')
     apartment_number = serializers.CharField(required=False, allow_blank=True, default='')
     landmark         = serializers.CharField(required=False, allow_blank=True, default='')
+    # Optional so older app builds keep posting inline addresses without them.
+    # When sent, the delivery-zone check covers inline orders too.
+    latitude         = serializers.DecimalField(max_digits=10, decimal_places=7,
+                                                required=False, allow_null=True)
+    longitude        = serializers.DecimalField(max_digits=10, decimal_places=7,
+                                                required=False, allow_null=True)
 
     items = OrderItemCreateSerializer(many=True)
     payment_method = serializers.ChoiceField(
