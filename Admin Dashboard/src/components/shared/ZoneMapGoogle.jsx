@@ -1,0 +1,141 @@
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { GoogleMap, useJsApiLoader, Polygon, Marker, Circle } from '@react-google-maps/api';
+
+/**
+ * Google Maps implementation of the delivery-zone editor.
+ *
+ * Interaction is deliberately identical to the Leaflet fallback: click to drop
+ * a vertex, drag a vertex to move it. Google's DrawingManager was not used —
+ * it owns its own overlay lifecycle, which fights the "draft lives in React
+ * state" model the page is built on, for no gain over a plain click handler.
+ *
+ * The map opens on the branch and at a close zoom, because zones are drawn
+ * around the market itself and the first thing you need to see is the streets
+ * next to it, not the governorate.
+ */
+
+const CONTAINER = { width: '100%', height: '100%' };
+
+// Roads and labels matter when tracing a delivery boundary; everything else is
+// noise. This trims the map furniture without hiding street names.
+const MAP_OPTIONS = {
+  streetViewControl: false,
+  mapTypeControl: true,
+  fullscreenControl: true,
+  clickableIcons: false,          // stop POI clicks from stealing vertex drops
+  styles: [
+    { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
+    { featureType: 'transit', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  ],
+};
+
+const toPath = (geometry) =>
+  (geometry?.coordinates?.[0] || []).slice(0, -1).map(([lng, lat]) => ({ lat, lng }));
+
+export default function ZoneMapGoogle({
+  apiKey, center, zoom = 14, branch, zones, draft, drawing, editingId,
+  showRadius, radiusKm, onMapClick, onVertexMove,
+}) {
+  const { isLoaded, loadError } = useJsApiLoader({
+    id: 'shoppingmarket-maps',
+    googleMapsApiKey: apiKey,
+  });
+  const mapRef = useRef(null);
+
+  const onLoad = useCallback((map) => { mapRef.current = map; }, []);
+
+  // Recentre when the admin switches branch — the zone is always drawn around
+  // the branch, so following the selection is the expected behaviour.
+  useEffect(() => {
+    if (mapRef.current && center) {
+      mapRef.current.panTo({ lat: center[0], lng: center[1] });
+    }
+  }, [center?.[0], center?.[1]]);
+
+  const draftPath = useMemo(() => draft.map(([lat, lng]) => ({ lat, lng })), [draft]);
+
+  if (loadError) {
+    return (
+      <div className="h-full flex items-center justify-center text-sm text-red-600 p-6 text-center">
+        تعذّر تحميل خرائط Google — تأكد من صلاحية المفتاح وتفعيل Maps JavaScript API.
+        <br />Google Maps failed to load — check the key and that Maps JavaScript API is enabled.
+      </div>
+    );
+  }
+  if (!isLoaded) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="animate-spin w-7 h-7 border-4 border-[#2E5E99] border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  return (
+    <GoogleMap
+      mapContainerStyle={CONTAINER}
+      center={{ lat: center[0], lng: center[1] }}
+      zoom={zoom}
+      options={MAP_OPTIONS}
+      onLoad={onLoad}
+      onClick={(e) => drawing && onMapClick([e.latLng.lat(), e.latLng.lng()])}
+    >
+      {branch && (
+        <Marker
+          position={{ lat: center[0], lng: center[1] }}
+          label={{ text: '🏪', fontSize: '22px' }}
+          icon={{ path: window.google.maps.SymbolPath.CIRCLE, scale: 0 }}
+          zIndex={5}
+        />
+      )}
+
+      {showRadius && (
+        <Circle
+          center={{ lat: center[0], lng: center[1] }}
+          radius={Number(radiusKm || 0) * 1000}
+          options={{ strokeColor: '#94a3b8', strokeOpacity: 0.8, fillOpacity: 0.05, clickable: false }}
+        />
+      )}
+
+      {zones.filter((z) => z.id !== editingId).map((zone) => (
+        <Polygon
+          key={zone.id}
+          paths={toPath(zone.geometry)}
+          options={{
+            strokeColor: zone.is_active ? '#2E5E99' : '#9ca3af',
+            fillColor: zone.is_active ? '#2E5E99' : '#9ca3af',
+            fillOpacity: zone.is_active ? 0.18 : 0.06,
+            clickable: false,
+          }}
+        />
+      ))}
+
+      {draftPath.length >= 2 && (
+        <Polygon
+          paths={draftPath}
+          options={{
+            strokeColor: '#2FBE8F', fillColor: '#2FBE8F',
+            fillOpacity: 0.2, clickable: false,
+          }}
+        />
+      )}
+
+      {drawing && draftPath.map((point, i) => (
+        <Marker
+          key={i}
+          position={point}
+          draggable
+          onDragEnd={(e) => onVertexMove(i, { lat: e.latLng.lat(), lng: e.latLng.lng() })}
+          icon={{
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: 6,
+            fillColor: '#2FBE8F',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2,
+          }}
+          zIndex={10}
+        />
+      ))}
+    </GoogleMap>
+  );
+}

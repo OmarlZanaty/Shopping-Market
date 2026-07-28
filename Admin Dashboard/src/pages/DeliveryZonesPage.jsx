@@ -1,61 +1,39 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MapContainer, TileLayer, Polygon, Marker, Circle, useMapEvents, useMap } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import { branchApi, zoneApi } from '../services/api';
 import { useOutletContext } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { branchApi, zoneApi } from '../services/api';
+import ZoneMapGoogle from '../components/shared/ZoneMapGoogle';
+import ZoneMapLeaflet from '../components/shared/ZoneMapLeaflet';
 
 /**
  * Delivery zones — draw the area a branch delivers to, instead of a radius.
  *
- * Drawing is hand-rolled rather than pulling in leaflet-draw: the whole
- * interaction is "click to drop points, drag to adjust, close the ring", which
- * is less code than configuring a plugin and keeps the bundle as it was.
+ * The map opens on the selected branch at street zoom: a zone is always drawn
+ * around the market itself, so the nearby streets are what you need to see
+ * first. Switching branch re-centres.
  *
- * The map opens on the selected branch, since a zone is always drawn around
- * the market's own location.
+ * Google Maps is used when VITE_GOOGLE_MAPS_API_KEY is set, OpenStreetMap
+ * otherwise — the page must stay usable when the key is missing rather than
+ * showing a blank panel.
  */
 
 const unwrap = (res) => (res?.data?.success !== undefined ? res.data.data : res?.data);
 
-// Leaflet's default marker images break under Vite's bundler; a div icon
-// sidesteps the asset resolution entirely.
-const branchIcon = L.divIcon({
-  className: '',
-  html: '<div style="font-size:26px;line-height:26px;transform:translate(-13px,-26px)">🏪</div>',
-  iconSize: [26, 26],
-});
-const vertexIcon = L.divIcon({
-  className: '',
-  html: '<div style="width:11px;height:11px;border-radius:50%;background:#2FBE8F;border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.4);transform:translate(-5px,-5px)"></div>',
-  iconSize: [11, 11],
-});
+const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
-// GeoJSON is [lng, lat]; Leaflet is [lat, lng]. Keeping the conversion in two
-// named helpers avoids the silent lat/lng swap this API invites.
-const toLatLngs = (geometry) =>
-  (geometry?.coordinates?.[0] || []).slice(0, -1).map(([lng, lat]) => [lat, lng]);
+// Only until a branch loads — never a fallback the admin actually draws on.
+const CAIRO = [30.0444, 31.2357];
+const STREET_ZOOM = 14;
 
 const toGeoJSON = (latlngs) => {
-  const ring = latlngs.map(([lat, lng]) => [lng, lat]);
-  if (ring.length) ring.push(ring[0]); // GeoJSON rings must close
+  const ring = latlngs.map(([lat, lng]) => [lng, lat]);   // GeoJSON is [lng, lat]
+  if (ring.length) ring.push(ring[0]);                     // rings must close
   return { type: 'Polygon', coordinates: [ring] };
 };
 
-function ClickCatcher({ active, onClick }) {
-  useMapEvents({ click: (e) => active && onClick([e.latlng.lat, e.latlng.lng]) });
-  return null;
-}
-
-function Recenter({ center }) {
-  const map = useMap();
-  useEffect(() => {
-    if (center) map.setView(center, map.getZoom() < 11 ? 12 : map.getZoom());
-  }, [center?.[0], center?.[1]]);
-  return null;
-}
+const toLatLngs = (geometry) =>
+  (geometry?.coordinates?.[0] || []).slice(0, -1).map(([lng, lat]) => [lat, lng]);
 
 export default function DeliveryZonesPage() {
   const { lang } = useOutletContext() || { lang: 'ar' };
@@ -64,7 +42,7 @@ export default function DeliveryZonesPage() {
 
   const [branchId, setBranchId] = useState(null);
   const [drawing, setDrawing] = useState(false);
-  const [draft, setDraft] = useState([]);          // [[lat,lng], ...]
+  const [draft, setDraft] = useState([]);            // [[lat, lng], ...]
   const [editingId, setEditingId] = useState(null);
   const [name, setName] = useState('');
 
@@ -88,21 +66,18 @@ export default function DeliveryZonesPage() {
     enabled: !!branchId,
   });
 
-  const center = branch
+  const center = branch && branch.latitude != null
     ? [Number(branch.latitude), Number(branch.longitude)]
-    : [30.0444, 31.2357]; // Cairo, only until a branch loads
+    : CAIRO;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['delivery-zones', branchId] });
 
+  const resetDraw = () => { setDrawing(false); setDraft([]); setEditingId(null); setName(''); };
+
   const saveZone = useMutation({
     mutationFn: ({ id, payload }) => (id ? zoneApi.update(id, payload) : zoneApi.create(payload)),
-    onSuccess: () => {
-      toast.success(t('تم حفظ المنطقة ✅', 'Zone saved ✅'));
-      resetDraw();
-      invalidate();
-    },
-    onError: (e) =>
-      toast.error(e?.response?.data?.message || t('فشل الحفظ', 'Save failed')),
+    onSuccess: () => { toast.success(t('تم حفظ المنطقة ✅', 'Zone saved ✅')); resetDraw(); invalidate(); },
+    onError: (e) => toast.error(e?.response?.data?.message || t('فشل الحفظ', 'Save failed')),
   });
 
   const removeZone = useMutation({
@@ -117,25 +92,11 @@ export default function DeliveryZonesPage() {
 
   const fromRadius = useMutation({
     mutationFn: () => zoneApi.fromRadius(branchId),
-    onSuccess: () => {
-      toast.success(t('تم إنشاء منطقة من نطاق الكيلومترات', 'Zone created from the radius'));
-      invalidate();
-    },
+    onSuccess: () => { toast.success(t('تم إنشاء المنطقة', 'Zone created')); invalidate(); },
+    onError: (e) => toast.error(e?.response?.data?.message || t('فشل', 'Failed')),
   });
 
-  const resetDraw = () => {
-    setDrawing(false);
-    setDraft([]);
-    setEditingId(null);
-    setName('');
-  };
-
-  const startNew = () => {
-    setDraft([]);
-    setEditingId(null);
-    setName('');
-    setDrawing(true);
-  };
+  const startNew = () => { setDraft([]); setEditingId(null); setName(''); setDrawing(true); };
 
   const startEdit = (zone) => {
     setDraft(toLatLngs(zone.geometry));
@@ -144,19 +105,12 @@ export default function DeliveryZonesPage() {
     setDrawing(true);
   };
 
-  const moveVertex = (index, latlng) => {
-    setDraft((points) => points.map((p, i) => (i === index ? [latlng.lat, latlng.lng] : p)));
-  };
+  const moveVertex = (index, { lat, lng }) =>
+    setDraft((points) => points.map((p, i) => (i === index ? [lat, lng] : p)));
 
   const submit = () => {
-    if (draft.length < 3) {
-      toast.error(t('ارسم 3 نقاط على الأقل', 'Draw at least 3 points'));
-      return;
-    }
-    if (!name.trim()) {
-      toast.error(t('اكتب اسم المنطقة', 'Name the zone'));
-      return;
-    }
+    if (draft.length < 3) return toast.error(t('ارسم 3 نقاط على الأقل', 'Draw at least 3 points'));
+    if (!name.trim()) return toast.error(t('اكتب اسم المنطقة', 'Name the zone'));
     saveZone.mutate({
       id: editingId,
       payload: {
@@ -169,6 +123,25 @@ export default function DeliveryZonesPage() {
   };
 
   const hasZones = zones.some((z) => z.is_active);
+  const radiusKm = Number(branch?.delivery_radius_km || 0);
+  // A very large radius drawn as a circle swamps the map and helps nobody.
+  const showRadius = !hasZones && radiusKm > 0 && radiusKm <= 50;
+
+  const MapImpl = MAPS_KEY ? ZoneMapGoogle : ZoneMapLeaflet;
+  const mapProps = {
+    apiKey: MAPS_KEY,
+    center,
+    zoom: STREET_ZOOM,
+    branch,
+    zones,
+    draft,
+    drawing,
+    editingId,
+    showRadius,
+    radiusKm,
+    onMapClick: (point) => setDraft((d) => [...d, point]),
+    onVertexMove: moveVertex,
+  };
 
   return (
     <div className="space-y-4">
@@ -193,7 +166,9 @@ export default function DeliveryZonesPage() {
             className="border border-gray-200 rounded-xl px-3 py-2 text-sm"
           >
             {branches.map((b) => (
-              <option key={b.id} value={b.id}>{lang === 'ar' ? b.name_ar : (b.name_en || b.name)}</option>
+              <option key={b.id} value={b.id}>
+                {lang === 'ar' ? b.name_ar : (b.name_en || b.name)}
+              </option>
             ))}
           </select>
 
@@ -203,14 +178,23 @@ export default function DeliveryZonesPage() {
                 className="bg-[#2FBE8F] hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold">
                 ✏️ {t('ارسم منطقة', 'Draw a zone')}
               </button>
-              <button onClick={() => fromRadius.mutate()} disabled={fromRadius.isPending}
-                className="border border-gray-200 hover:bg-gray-50 text-[#2E5E99] px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-40">
-                ⭕ {t('حوّل النطاق الحالي لمنطقة', 'Convert current radius')}
-              </button>
+              {radiusKm > 0 && radiusKm <= 50 && (
+                <button onClick={() => fromRadius.mutate()} disabled={fromRadius.isPending}
+                  className="border border-gray-200 hover:bg-gray-50 text-[#2E5E99] px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-40">
+                  ⭕ {t('حوّل النطاق الحالي', 'Convert current radius')}
+                </button>
+              )}
             </>
           )}
         </div>
       </div>
+
+      {!MAPS_KEY && (
+        <div className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-3 py-2">
+          {t('خرائط Google غير مفعّلة — أضف VITE_GOOGLE_MAPS_API_KEY لاستخدامها. الخريطة الحالية OpenStreetMap.',
+             'Google Maps is not configured — set VITE_GOOGLE_MAPS_API_KEY to enable it. Showing OpenStreetMap.')}
+        </div>
+      )}
 
       {drawing && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3 flex-wrap">
@@ -233,8 +217,7 @@ export default function DeliveryZonesPage() {
             className="bg-[#2FBE8F] hover:bg-emerald-600 text-white px-4 py-1.5 rounded-xl text-sm font-bold disabled:opacity-40">
             ✅ {t('حفظ', 'Save')}
           </button>
-          <button onClick={resetDraw}
-            className="text-sm px-3 py-1.5 rounded-xl text-gray-500 hover:bg-white">
+          <button onClick={resetDraw} className="text-sm px-3 py-1.5 rounded-xl text-gray-500 hover:bg-white">
             {t('إلغاء', 'Cancel')}
           </button>
         </div>
@@ -242,52 +225,7 @@ export default function DeliveryZonesPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         <div className="lg:col-span-3 rounded-2xl overflow-hidden border border-gray-100" style={{ height: '65vh' }}>
-          <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }}>
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution="&copy; OpenStreetMap"
-            />
-            <Recenter center={center} />
-            <ClickCatcher active={drawing} onClick={(p) => setDraft((d) => [...d, p])} />
-
-            {branch && (
-              <>
-                <Marker position={center} icon={branchIcon} />
-                {/* The radius still in force when no zone covers this branch. */}
-                {!hasZones && (
-                  <Circle
-                    center={center}
-                    radius={Number(branch.delivery_radius_km || 0) * 1000}
-                    pathOptions={{ color: '#94a3b8', dashArray: '6', fillOpacity: 0.05 }}
-                  />
-                )}
-              </>
-            )}
-
-            {zones.filter((z) => z.id !== editingId).map((zone) => (
-              <Polygon
-                key={zone.id}
-                positions={toLatLngs(zone.geometry)}
-                pathOptions={{
-                  color: zone.is_active ? '#2E5E99' : '#9ca3af',
-                  fillOpacity: zone.is_active ? 0.18 : 0.06,
-                }}
-              />
-            ))}
-
-            {draft.length >= 2 && (
-              <Polygon positions={draft} pathOptions={{ color: '#2FBE8F', fillOpacity: 0.2 }} />
-            )}
-            {drawing && draft.map((point, i) => (
-              <Marker
-                key={i}
-                position={point}
-                icon={vertexIcon}
-                draggable
-                eventHandlers={{ dragend: (e) => moveVertex(i, e.target.getLatLng()) }}
-              />
-            ))}
-          </MapContainer>
+          <MapImpl {...mapProps} />
         </div>
 
         <div className="space-y-2">
