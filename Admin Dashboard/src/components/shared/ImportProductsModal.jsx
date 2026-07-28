@@ -117,8 +117,35 @@ export default function ImportProductsModal({ lang, onClose }) {
     </div>
   );
 
+  // What the backend actually read: which sheet, which header row, and which
+  // columns it could not place. Shown before confirming so a mis-named column
+  // is caught here instead of turning into "the import did nothing".
+  const FileMeta = ({ meta }) => {
+    if (!meta) return null;
+    const ignored = meta.unknown_columns || [];
+    const missing = meta.missing_columns || [];
+    return (
+      <div className="text-xs bg-gray-50 border border-gray-100 rounded-xl p-3 space-y-1">
+        <div className="text-gray-600">
+          {t('الورقة', 'Sheet')}: <b>{meta.sheet}</b> · {t('صف العناوين', 'Header row')}: <b>{meta.header_row}</b>
+        </div>
+        {ignored.length > 0 && (
+          <div className="text-amber-700">
+            ⚠ {t('أعمدة غير معروفة (تم تجاهلها)', 'Unrecognized columns (ignored)')}: {ignored.join(lang === 'ar' ? '، ' : ', ')}
+          </div>
+        )}
+        {missing.length > 0 && (
+          <div className="text-gray-500">
+            {t('أعمدة غير موجودة بالملف (لن تتغير)', 'Columns not in the file (left unchanged)')}: {missing.join(', ')}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const Summary = ({ data, isPreview }) => (
     <div className="space-y-3">
+      <FileMeta meta={data.file} />
       <div className="grid grid-cols-3 gap-3 text-center">
         <div className="bg-green-50 border border-green-100 rounded-xl py-3">
           <div className="text-2xl font-bold text-green-600">{data.created}</div>
@@ -180,8 +207,8 @@ export default function ImportProductsModal({ lang, onClose }) {
 
             <p className="text-xs text-gray-500 leading-relaxed">
               {t(
-                'الباركود هو المفتاح: باركود موجود = تحديث المنتج، باركود جديد = إنشاء منتج. الخلايا الفارغة تُبقي القيمة الحالية دون تغيير.',
-                'Barcode is the key: existing barcode = update, new barcode = create. Blank cells keep the current value unchanged.'
+                'الباركود هو المفتاح: باركود موجود = تحديث المنتج، باركود جديد = إنشاء منتج. الخلايا الفارغة تُبقي القيمة الحالية دون تغيير. لو في أعمدة معمولة بمعادلات (مثل الاسم الإنجليزي)، حوّلها لقيم أولاً: نسخ ← لصق خاص ← قيم.',
+                'Barcode is the key: existing barcode = update, new barcode = create. Blank cells keep the current value unchanged. If a column is filled by a formula (English name is the usual one), convert it first: Copy → Paste Special → Values.'
               )}
             </p>
 
