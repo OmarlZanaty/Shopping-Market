@@ -46,6 +46,16 @@ workflows:
           flutter pub get
       - name: Install CocoaPods dependencies
         script: find . -name "Podfile" -execdir pod install \;
+      - name: Social sign-in spinner regression test (blocking)
+        script: |
+          # App Review 2.1(a), build 22: "kept loading indefinitely when trying
+          # to login using the provided demo credentials or Sign in with Apple".
+          # Unlike the iOS runtime test below, this runs on the plain host test
+          # runner with no simulator involved — so it has no destination-matching
+          # problem and IS allowed to fail the build. That matters: the step
+          # below is deliberately non-blocking, which meant nothing in CI could
+          # actually stop a stuck-spinner build from shipping.
+          flutter test test/social_signin_spinner_test.dart
       - name: iOS sign-in regression test (real iOS runtime, no device needed)
         script: |
           # Guards against a repeat of the App Review 2.1(a) rejections

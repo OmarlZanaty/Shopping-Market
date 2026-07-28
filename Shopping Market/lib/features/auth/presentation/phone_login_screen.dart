@@ -436,8 +436,11 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
       final googleSignIn = GoogleSignIn(scopes: const ['email']);
       // Sign out first so the account picker always appears (avoids silently
       // reusing a previously-selected account).
-      await googleSignIn.signOut();
-      final account = await googleSignIn.signIn();
+      await googleSignIn.signOut().timeout(const Duration(seconds: 20));
+      // Bounded for the same reason as the Apple call below: a platform-channel
+      // call that never returns strands the spinner before `finally` can run.
+      final account =
+          await googleSignIn.signIn().timeout(const Duration(seconds: 120));
       if (account == null) {
         // User cancelled the picker.
         if (mounted) setState(() => _isLoading = false);
@@ -470,12 +473,17 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     if (_isLoading) return;
     setState(() => _isLoading = true);
     try {
+      // Bounded as well: this is a native modal behind a platform channel, and
+      // a channel call that never returns would strand the spinner *before*
+      // the `finally` below can ever run — the same failure shape as the
+      // Firebase phone plugin. The cap is deliberately generous (the reviewer
+      // may be typing an Apple ID password), but it must exist.
       final credential = await SignInWithApple.getAppleIDCredential(
         scopes: const [
           AppleIDAuthorizationScopes.email,
           AppleIDAuthorizationScopes.fullName,
         ],
-      );
+      ).timeout(const Duration(seconds: 120));
       final fullName = [credential.givenName, credential.familyName]
           .where((s) => s != null && s.isNotEmpty)
           .join(' ');
