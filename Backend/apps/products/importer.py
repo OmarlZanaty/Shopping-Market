@@ -10,6 +10,11 @@ Semantics:
   warning, not an error — the row still imports.
 - dry_run computes the same result without writing anything.
 
+File reading (sheet pick, header-row detection, column aliases, formula cells
+with no cached value) lives in import_parsing.py; see that module for why.
+Nothing here silently discards data any more: an unreadable formula cell fails
+its row, and columns that could not be placed are reported by the view.
+
 Result shape:
     {
         'total_rows': int, 'created': int, 'updated': int,
@@ -21,9 +26,10 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 
+from .import_parsing import (  # noqa: F401 — re-exported for callers/tests
+    COLUMNS, FORMULA_NO_VALUE, MAX_ROWS, ROW_NUMBER_KEY, ParseResult, parse_file,
+)
 from .models import Product, Category
-
-MAX_ROWS = 50000
 
 # Model fields writable via import; bulk_update rewrites all of them for every
 # touched row using the instance's in-memory value (unchanged fields keep the
@@ -33,14 +39,6 @@ UPDATE_FIELDS = [
     'original_price', 'discount_price', 'cost_price',
     'quantity_in_stock', 'low_stock_threshold', 'sell_unit',
     'is_weight_based', 'is_available', 'image_url_s3', 'main_image',
-]
-
-# header -> model field (identity unless noted)
-COLUMNS = [
-    'barcode', 'name_ar', 'name_en', 'description_ar', 'description_en',
-    'categories', 'original_price', 'discount_price', 'cost_price',
-    'quantity_in_stock', 'low_stock_threshold', 'sell_unit',
-    'is_weight_based', 'is_available', 'image_url',
 ]
 
 REQUIRED_FOR_CREATE = ('name_ar', 'original_price')
@@ -53,37 +51,31 @@ class RowError(Exception):
     pass
 
 
-def parse_file(django_file, filename):
-    """Return list of dict rows from an uploaded .xlsx or .csv file."""
-    if filename.lower().endswith('.xlsx'):
-        import openpyxl
-        wb = openpyxl.load_workbook(django_file, read_only=True, data_only=True)
-        ws = wb.active
-        rows_iter = ws.iter_rows(values_only=True)
-        try:
-            headers = [str(h).strip().lower() if h is not None else '' for h in next(rows_iter)]
-        except StopIteration:
-            return []
-        rows = []
-        for r in rows_iter:
-            if all(v is None or str(v).strip() == '' for v in r):
-                continue
-            rows.append(dict(zip(headers, r)))
-        wb.close()
-        return rows
-    # CSV
-    import csv
-    import io
-    text = django_file.read().decode('utf-8-sig')
-    reader = csv.DictReader(io.StringIO(text))
-    reader.fieldnames = [f.strip().lower() for f in (reader.fieldnames or [])]
-    return [row for row in reader if any((v or '').strip() for v in row.values())]
+FORMULA_HINT = (
+    'contains a formula with no saved result — open the file in Excel, '
+    'copy the column and Paste Special → Values, then re-upload'
+)
 
 
 def _cell(row, key):
-    """Normalized cell value: stripped string, or None when blank/missing."""
+    """Normalized cell value: stripped string, or None when blank/missing.
+
+    Raises RowError for a formula cell with no cached result, so the row fails
+    visibly instead of being treated as "leave this column unchanged".
+    """
     v = row.get(key)
+    if isinstance(v, type(FORMULA_NO_VALUE)):
+        raise RowError(f'{key}: {FORMULA_HINT}')
     if v is None:
+        return None
+    s = str(v).strip()
+    return s if s != '' else None
+
+
+def _cell_quiet(row, key):
+    """_cell without the formula check — for pre-scans that must not raise."""
+    v = row.get(key)
+    if v is None or isinstance(v, type(FORMULA_NO_VALUE)):
         return None
     s = str(v).strip()
     return s if s != '' else None
@@ -167,7 +159,7 @@ def _match_categories(names_cell, category_index):
     return matched, missing
 
 
-def run_import(rows, user, store_id, dry_run=False):
+def run_import(rows, user, store_id, dry_run=False, header_row=1):
     """Validate all rows and (unless dry_run) upsert products by barcode.
 
     Writes are batched: every row is validated first (no DB writes), then all
@@ -176,6 +168,9 @@ def run_import(rows, user, store_id, dry_run=False):
     full-catalog import (10k+ rows) well under the request/worker timeout that
     a per-row save() loop would blow past.
     """
+    if isinstance(rows, ParseResult):
+        header_row = rows.header_row or header_row
+        rows = rows.rows
     result = {'total_rows': len(rows), 'created': 0, 'updated': 0, 'errors': [], 'warnings': []}
     if len(rows) > MAX_ROWS:
         result['errors'].append({'row': 0, 'barcode': '', 'reason': f'File has {len(rows)} rows; maximum is {MAX_ROWS}'})
@@ -200,7 +195,7 @@ def run_import(rows, user, store_id, dry_run=False):
         category_index[c.name_en.strip().lower()] = c
         category_index[c.name_ar.strip().lower()] = c
 
-    barcodes = [b for b in (_cell(r, 'barcode') for r in rows) if b]
+    barcodes = [b for b in (_cell_quiet(r, 'barcode') for r in rows) if b]
     existing = {p.barcode: p for p in product_qs.filter(barcode__in=barcodes)}
     # Barcode is globally unique; store admins may not touch another store's.
     other_store_barcodes = set()
@@ -217,9 +212,10 @@ def run_import(rows, user, store_id, dry_run=False):
 
     seen = set()
     for idx, row in enumerate(rows):
-        rownum = idx + 2  # 1-based + header row
-        barcode = _cell(row, 'barcode')
+        rownum = row.get(ROW_NUMBER_KEY) or idx + header_row + 1  # row as the client sees it
+        barcode = _cell_quiet(row, 'barcode')
         try:
+            barcode = _cell(row, 'barcode')  # re-read so a formula cell errors
             if not barcode:
                 raise RowError('barcode is required')
             if barcode in seen:

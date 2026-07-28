@@ -584,14 +584,35 @@ class AdminProductImportView(APIView):
             store_id = None
 
         try:
-            rows = importer.parse_file(upload, upload.name)
+            parsed = importer.parse_file(upload, upload.name)
         except Exception as e:
             return fail(f'Could not read file: {e}', status_code=400)
-        if not rows:
+        if not len(parsed):
+            if not parsed.sheet:
+                return fail(
+                    'No header row with a "barcode" column was found in any sheet '
+                    f'(checked: {", ".join(parsed.sheets_scanned) or "none"}). '
+                    'Download the template and match its column names.',
+                    status_code=400,
+                )
             return fail('File contains no data rows', status_code=400)
 
-        result = importer.run_import(rows, request.user, store_id, dry_run=dry_run)
+        result = importer.run_import(parsed, request.user, store_id, dry_run=dry_run)
         result['dry_run'] = dry_run
+        result['file'] = parsed.as_meta()
+
+        # Unplaceable columns are the biggest cause of "the import said OK but
+        # nothing changed" — surface them ahead of the per-row warnings.
+        for name in parsed.duplicate_columns:
+            result['warnings'].insert(0, {
+                'row': parsed.header_row, 'barcode': '',
+                'reason': f'column "{name}" appears more than once — the first non-empty value was used',
+            })
+        for label in parsed.unknown_columns:
+            result['warnings'].insert(0, {
+                'row': parsed.header_row, 'barcode': '',
+                'reason': f'column "{label}" is not a recognized field — it was ignored',
+            })
 
         if not dry_run:
             ProductImportJob.objects.create(
