@@ -5,6 +5,23 @@ workflows:
     max_build_duration: 90
     # The Flutter customer app lives in this subfolder of the repo.
     working_directory: "Shopping Market"
+    # Build every push to master automatically. Until now the workflow had no
+    # `triggering:` block at all, so a release build only happened when someone
+    # remembered to click "Start new build" — easy to miss when a fix is pushed
+    # in a hurry after a rejection.
+    #
+    # REQUIRES a webhook: Codemagic → app settings → Webhooks. Without it this
+    # block is inert and builds stay manual.
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: master
+          include: true
+          source: true
+      # A newer push supersedes an in-flight build of the same branch, so a
+      # follow-up fix doesn't queue behind a build that is already stale.
+      cancel_previous_builds: true
     integrations:
       # This name MUST match the App Store Connect API key you add in
       # Codemagic → Teams/User settings → Integrations → App Store Connect.
