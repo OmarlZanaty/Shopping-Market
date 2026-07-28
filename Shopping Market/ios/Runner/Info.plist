@@ -23,10 +23,17 @@
 
 	<key>NSLocationWhenInUseUsageDescription</key>
     <string>نحتاج موقعك لتحديد عنوان التوصيل</string>
+	<!-- App Review rejected build 22 under Guideline 5.1.1(ii): the previous
+	     string ("نستخدم الكاميرا لمسح الباركود والتقاط الصور") named the feature
+	     but never said what the data is used FOR. Apple requires a concrete
+	     example of the use, so both uses are spelled out explicitly. -->
 	<key>NSCameraUsageDescription</key>
-	<string>نستخدم الكاميرا لمسح الباركود والتقاط الصور</string>
+	<string>يستخدم التطبيق الكاميرا لمسح الباركود الموجود على المنتج فيضيفه مباشرة إلى سلة التسوق دون البحث عنه يدوياً، ولالتقاط صورة ترفقها بطلب الدعم لتوضيح مشكلة في طلبك — مثل تصوير منتج وصل تالفاً. لا تُستخدم الصور لأي غرض آخر ولا تُشارك مع أي جهة خارجية.</string>
+	<!-- Not flagged by App Review, but it had the same defect as the camera
+	     string above — strengthened pre-emptively rather than waiting for it to
+	     become the next 5.1.1(ii) rejection. -->
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>نحتاج الوصول للصور لرفع صورة أو مرفق</string>
+	<string>يطلب التطبيق الوصول إلى صورك لتختار صورة من الاستوديو وترفقها بطلب الدعم عند الإبلاغ عن مشكلة في طلبك، أو لتعيين صورة لحسابك الشخصي. لا يتم الوصول إلى مكتبة الصور إلا عند اختيارك صورة بنفسك.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>نستخدم Face ID لتسجيل الدخول الآمن إلى حسابك</string>
 	<key>ITSAppUsesNonExemptEncryption</key>

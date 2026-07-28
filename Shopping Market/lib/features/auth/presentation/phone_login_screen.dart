@@ -456,6 +456,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         content: Text('تعذّر تسجيل الدخول عبر Google'),
         backgroundColor: AppColors.errorRed,
       ));
+    } finally {
+      // Last line of defence — this button must never be left spinning.
+      if (mounted && _isLoading) setState(() => _isLoading = false);
     }
   }
 
@@ -498,6 +501,11 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         content: Text('تعذّر تسجيل الدخول عبر Apple'),
         backgroundColor: AppColors.errorRed,
       ));
+    } finally {
+      // Last line of defence — this button must never be left spinning.
+      // Guideline 2.1(a), build 22: the reviewer reported exactly this on the
+      // Sign in with Apple button, on iPad Air / iPadOS 26.6.
+      if (mounted && _isLoading) setState(() => _isLoading = false);
     }
   }
 
@@ -513,14 +521,33 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     String? token,
   }) async {
     final auth = context.read<AuthProvider>();
-    final result = await auth.handleSocialLogin(
-      provider: provider,
-      socialId: socialId,
-      email: email,
-      fullName: fullName,
-      phone: phone,
-      token: token,
-    );
+    // Bounded for the same reason the OTP screen's chain is: App Review
+    // rejected build 22 under 2.1(a) for "loading indefinitely ... using the
+    // provided demo credentials or Sign in with Apple". Build 22 bounded only
+    // the OTP path; this await had no timeout at all, so a network hop or
+    // Keychain write that never settles strands `_isLoading` at true forever
+    // with no error to show — the reviewer's exact report on the Apple button.
+    final SocialLoginResult result;
+    try {
+      result = await auth
+          .handleSocialLogin(
+            provider: provider,
+            socialId: socialId,
+            email: email,
+            fullName: fullName,
+            phone: phone,
+            token: token,
+          )
+          .timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('استغرق تسجيل الدخول وقتاً طويلاً. حاول مرة أخرى.'),
+        backgroundColor: AppColors.errorRed,
+      ));
+      return;
+    }
     if (!mounted) return;
 
     switch (result) {
