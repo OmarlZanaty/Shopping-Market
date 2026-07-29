@@ -81,6 +81,25 @@ class GeometryTests(TestCase):
             with self.assertRaises(ValueError):
                 validate_geometry(bad)
 
+    def test_validate_geometry_rejects_a_bow_tie(self):
+        """Crossed edges make containment nonsense — catch it at save time."""
+        bow_tie = {'type': 'Polygon', 'coordinates': [[
+            [31.20, 30.00], [31.30, 30.10], [31.30, 30.00], [31.20, 30.05], [31.20, 30.00],
+        ]]}
+        with self.assertRaises(ValueError):
+            validate_geometry(bow_tie)
+
+    def test_validate_geometry_rejects_a_zone_with_no_area(self):
+        collinear = {'type': 'Polygon', 'coordinates': [[
+            [31.20, 30.00], [31.25, 30.05], [31.30, 30.10], [31.20, 30.00],
+        ]]}
+        with self.assertRaises(ValueError):
+            validate_geometry(collinear)
+
+    def test_validate_geometry_accepts_the_shapes_admins_actually_draw(self):
+        self.assertIsNotNone(validate_geometry(SQUARE))
+        self.assertIsNotNone(validate_geometry(circle_to_polygon(30.05, 31.25, 5)))
+
 
 class CoverageTests(TestCase):
 
@@ -258,3 +277,21 @@ class AdminZoneApiTests(TestCase):
         # Same area the branch already served: 3km in is covered, 5km out is not.
         self.assertTrue(zone.contains(30.05 + 0.018, 31.25))
         self.assertFalse(zone.contains(30.05 + 0.060, 31.25))
+
+    def test_zone_from_radius_twice_refreshes_instead_of_duplicating(self):
+        url = f'/api/v1/branches/admin/{self.branch.id}/zone-from-radius/'
+        self.assertEqual(self.client.post(url, {}, format='json').status_code, 200)
+        r = self.client.post(url, {'radius_km': 8}, format='json')
+        self.assertEqual(r.status_code, 200, r.content)
+
+        zone = DeliveryZone.objects.get(source=DeliveryZone.Source.CIRCLE)
+        self.assertEqual(DeliveryZone.objects.count(), 1)
+        self.assertTrue(zone.contains(30.05 + 0.060, 31.25))   # now the 8km area
+
+    def test_zone_from_radius_leaves_drawn_zones_alone(self):
+        drawn = DeliveryZone.objects.create(branch=self.branch, name_ar='مرسومة', geometry=SQUARE)
+        self.client.post(f'/api/v1/branches/admin/{self.branch.id}/zone-from-radius/',
+                         {}, format='json')
+        drawn.refresh_from_db()
+        self.assertEqual(drawn.geometry, SQUARE)
+        self.assertEqual(DeliveryZone.objects.count(), 2)

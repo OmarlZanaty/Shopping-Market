@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GoogleMap, useJsApiLoader, Polygon, Marker, Circle } from '@react-google-maps/api';
+import { ringsToLatLngs } from '../../utils/zoneGeometry';
 
 /**
  * Google Maps implementation of the delivery-zone editor.
@@ -29,12 +30,16 @@ const MAP_OPTIONS = {
   ],
 };
 
-const toPath = (geometry) =>
-  (geometry?.coordinates?.[0] || []).slice(0, -1).map(([lng, lat]) => ({ lat, lng }));
+// Every ring, holes included — Google fills with the even-odd rule, so passing
+// them all is what makes a hole actually read as a hole.
+const toPaths = (geometry) =>
+  ringsToLatLngs(geometry).map((ring) => ring.map(([lat, lng]) => ({ lat, lng })));
+
+const LOGO_SIZE = 42;
 
 export default function ZoneMapGoogle({
   apiKey, center, zoom = 14, branch, zones, draft, drawing, editingId,
-  showRadius, radiusKm, onMapClick, onVertexMove,
+  showRadius, radiusKm, onMapClick, onVertexMove, onVertexDelete,
 }) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'shoppingmarket-maps',
@@ -53,6 +58,20 @@ export default function ZoneMapGoogle({
   }, [center?.[0], center?.[1]]);
 
   const draftPath = useMemo(() => draft.map(([lat, lng]) => ({ lat, lng })), [draft]);
+
+  // A Google marker whose icon URL 404s renders nothing at all, so the logo is
+  // loaded first and the 🏪 pin stays the fallback for stores without one.
+  const logoUrl = branch?.store_logo_url || '';
+  const [logoOk, setLogoOk] = useState(false);
+  useEffect(() => {
+    setLogoOk(false);
+    if (!logoUrl) return undefined;
+    const image = new Image();
+    let alive = true;
+    image.onload = () => { if (alive) setLogoOk(true); };
+    image.src = logoUrl;
+    return () => { alive = false; };
+  }, [logoUrl]);
 
   if (loadError) {
     return (
@@ -82,9 +101,20 @@ export default function ZoneMapGoogle({
       {branch && (
         <Marker
           position={{ lat: center[0], lng: center[1] }}
-          label={{ text: '🏪', fontSize: '22px' }}
-          icon={{ path: window.google.maps.SymbolPath.CIRCLE, scale: 0 }}
-          zIndex={5}
+          title={branch.name_ar || branch.name}
+          {...(logoOk
+            ? {
+                icon: {
+                  url: branch.store_logo_url,
+                  scaledSize: new window.google.maps.Size(LOGO_SIZE, LOGO_SIZE),
+                  anchor: new window.google.maps.Point(LOGO_SIZE / 2, LOGO_SIZE / 2),
+                },
+              }
+            : {
+                label: { text: '🏪', fontSize: '22px' },
+                icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 0 },
+              })}
+          zIndex={6}
         />
       )}
 
@@ -99,7 +129,7 @@ export default function ZoneMapGoogle({
       {zones.filter((z) => z.id !== editingId).map((zone) => (
         <Polygon
           key={zone.id}
-          paths={toPath(zone.geometry)}
+          paths={toPaths(zone.geometry)}
           options={{
             strokeColor: zone.is_active ? '#2E5E99' : '#9ca3af',
             fillColor: zone.is_active ? '#2E5E99' : '#9ca3af',
@@ -124,7 +154,9 @@ export default function ZoneMapGoogle({
           key={i}
           position={point}
           draggable
+          title="حذف النقطة / click to delete"
           onDragEnd={(e) => onVertexMove(i, { lat: e.latLng.lat(), lng: e.latLng.lng() })}
+          onClick={() => onVertexDelete?.(i)}
           icon={{
             path: window.google.maps.SymbolPath.CIRCLE,
             scale: 6,

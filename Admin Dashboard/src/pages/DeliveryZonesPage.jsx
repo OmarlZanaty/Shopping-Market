@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { branchApi, zoneApi } from '../services/api';
 import ZoneMapGoogle from '../components/shared/ZoneMapGoogle';
 import ZoneMapLeaflet from '../components/shared/ZoneMapLeaflet';
+import { buildGeometry, editableRing, hasExtraParts } from '../utils/zoneGeometry';
 
 /**
  * Delivery zones — draw the area a branch delivers to, instead of a radius.
@@ -26,15 +27,6 @@ const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 const CAIRO = [30.0444, 31.2357];
 const STREET_ZOOM = 14;
 
-const toGeoJSON = (latlngs) => {
-  const ring = latlngs.map(([lat, lng]) => [lng, lat]);   // GeoJSON is [lng, lat]
-  if (ring.length) ring.push(ring[0]);                     // rings must close
-  return { type: 'Polygon', coordinates: [ring] };
-};
-
-const toLatLngs = (geometry) =>
-  (geometry?.coordinates?.[0] || []).slice(0, -1).map(([lng, lat]) => [lat, lng]);
-
 export default function DeliveryZonesPage() {
   const { lang } = useOutletContext() || { lang: 'ar' };
   const t = (ar, en) => (lang === 'ar' ? ar : en);
@@ -44,6 +36,9 @@ export default function DeliveryZonesPage() {
   const [drawing, setDrawing] = useState(false);
   const [draft, setDraft] = useState([]);            // [[lat, lng], ...]
   const [editingId, setEditingId] = useState(null);
+  // The geometry the draft came from — kept so a MultiPolygon's other parts and
+  // any holes survive an edit of its outer ring.
+  const [editingGeometry, setEditingGeometry] = useState(null);
   const [name, setName] = useState('');
 
   const { data: branches = [] } = useQuery({
@@ -72,7 +67,10 @@ export default function DeliveryZonesPage() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['delivery-zones', branchId] });
 
-  const resetDraw = () => { setDrawing(false); setDraft([]); setEditingId(null); setName(''); };
+  const resetDraw = () => {
+    setDrawing(false); setDraft([]); setEditingId(null);
+    setEditingGeometry(null); setName('');
+  };
 
   const saveZone = useMutation({
     mutationFn: ({ id, payload }) => (id ? zoneApi.update(id, payload) : zoneApi.create(payload)),
@@ -96,17 +94,36 @@ export default function DeliveryZonesPage() {
     onError: (e) => toast.error(e?.response?.data?.message || t('فشل', 'Failed')),
   });
 
-  const startNew = () => { setDraft([]); setEditingId(null); setName(''); setDrawing(true); };
+  const startNew = () => {
+    setDraft([]); setEditingId(null); setEditingGeometry(null);
+    setName(''); setDrawing(true);
+  };
 
   const startEdit = (zone) => {
-    setDraft(toLatLngs(zone.geometry));
+    setDraft(editableRing(zone.geometry));
     setEditingId(zone.id);
+    setEditingGeometry(zone.geometry);
     setName(zone.name_ar || '');
     setDrawing(true);
+    if (hasExtraParts(zone.geometry)) {
+      toast(t('هذه المنطقة متعددة الأجزاء — تعدّل الجزء الأول فقط، والباقي يُحفظ كما هو.',
+              'Multi-part zone — you are editing the first part; the rest is kept as is.'));
+    }
   };
 
   const moveVertex = (index, { lat, lng }) =>
     setDraft((points) => points.map((p, i) => (i === index ? [lat, lng] : p)));
+
+  // Clicking a point removes it: undo only reaches the last one, and a single
+  // misplaced vertex in the middle otherwise means redrawing the whole zone.
+  const deleteVertex = (index) =>
+    setDraft((points) => {
+      if (points.length <= 3) {
+        toast.error(t('لا يمكن أن تقل المنطقة عن 3 نقاط', 'A zone needs at least 3 points'));
+        return points;
+      }
+      return points.filter((_, i) => i !== index);
+    });
 
   const submit = () => {
     if (draft.length < 3) return toast.error(t('ارسم 3 نقاط على الأقل', 'Draw at least 3 points'));
@@ -117,7 +134,7 @@ export default function DeliveryZonesPage() {
         branch: Number(branchId),
         name_ar: name.trim(),
         name_en: name.trim(),
-        geometry: toGeoJSON(draft),
+        geometry: buildGeometry(draft, editingGeometry),
       },
     });
   };
@@ -141,6 +158,7 @@ export default function DeliveryZonesPage() {
     radiusKm,
     onMapClick: (point) => setDraft((d) => [...d, point]),
     onVertexMove: moveVertex,
+    onVertexDelete: deleteVertex,
   };
 
   return (
@@ -199,8 +217,8 @@ export default function DeliveryZonesPage() {
       {drawing && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3 flex-wrap">
           <span className="text-sm text-emerald-900 font-semibold">
-            {t('اضغط على الخريطة لإضافة نقاط. اسحب أي نقطة لتعديلها.',
-               'Click the map to add points. Drag a point to adjust it.')}
+            {t('اضغط على الخريطة لإضافة نقاط. اسحب نقطة لتعديلها، واضغط عليها لحذفها.',
+               'Click the map to add points. Drag a point to move it, click it to delete it.')}
           </span>
           <input
             value={name}

@@ -51,10 +51,19 @@ def covering_branch(lat, lng, store_id=None):
     covering = [b for b in branches if branch_covers(b, lat, lng)]
     if not covering:
         return None
-    return min(
-        covering,
-        key=lambda b: haversine_km(b.latitude, b.longitude, lat, lng),
-    )
+    return min(covering, key=lambda b: _distance_or_last(b, lat, lng))
+
+
+def _distance_or_last(branch, lat, lng):
+    """Distance to the branch, or +inf when it has no coordinates.
+
+    A branch can cover a point through its zones while its own latitude and
+    longitude are still null — sorting must not blow up on that; such a branch
+    simply has no claim to being the *nearest* one.
+    """
+    if branch.latitude is None or branch.longitude is None:
+        return float('inf')
+    return haversine_km(branch.latitude, branch.longitude, lat, lng)
 
 
 def is_covered(lat, lng, store_id=None):

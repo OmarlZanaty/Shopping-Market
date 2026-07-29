@@ -11,6 +11,11 @@ from apps.core.responses import ok, fail
 
 
 class BranchSerializer(serializers.ModelSerializer):
+    # The dashboard's zone map pins the branch with the store's own logo, so
+    # the marker reads as "this shop" rather than a generic dot.
+    store_logo_url = serializers.CharField(source='store.logo_url', read_only=True)
+    store_name = serializers.CharField(source='store.name', read_only=True)
+
     class Meta:
         model = Branch
         fields = '__all__'
@@ -22,7 +27,7 @@ class BranchListView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        qs = Branch.objects.filter(is_active=True)
+        qs = Branch.objects.filter(is_active=True).select_related('store')
         store_id = self.request.query_params.get('store_id')
         if store_id:
             qs = qs.filter(store_id=store_id)
@@ -34,7 +39,7 @@ class AdminBranchView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminWriteOrSupportRead]
 
     def get_queryset(self):
-        return scope_to_user(Branch.objects.all(), self.request.user)
+        return scope_to_user(Branch.objects.select_related('store'), self.request.user)
 
     def perform_create(self, serializer):
         enforce_store_id_on_create(serializer, self.request.user)
@@ -128,13 +133,26 @@ class AdminZoneFromRadiusView(APIView):
             return fail('Branch has no coordinates', status_code=400)
 
         radius = request.data.get('radius_km') or branch.delivery_radius_km
-        zone = DeliveryZone.objects.create(
-            branch=branch,
-            name_ar=request.data.get('name_ar') or f'نطاق {branch.name_ar}',
-            name_en=request.data.get('name_en') or f'{branch.name_en or branch.name} area',
-            geometry=circle_to_polygon(branch.latitude, branch.longitude, radius),
-            source=DeliveryZone.Source.CIRCLE,
-        )
+        # Pressing the button twice must not stack two identical circles: a
+        # branch keeps one converted-radius zone, refreshed in place. Zones
+        # drawn by hand are never touched, even if this branch has several.
+        fields = {
+            'name_ar': request.data.get('name_ar') or f'نطاق {branch.name_ar}',
+            'name_en': request.data.get('name_en') or f'{branch.name_en or branch.name} area',
+            'geometry': circle_to_polygon(branch.latitude, branch.longitude, radius),
+            'is_active': True,
+        }
+        zone = DeliveryZone.objects.filter(
+            branch=branch, source=DeliveryZone.Source.CIRCLE,
+        ).order_by('id').first()
+        if zone:
+            for field, value in fields.items():
+                setattr(zone, field, value)
+            zone.save()
+        else:
+            zone = DeliveryZone.objects.create(
+                branch=branch, source=DeliveryZone.Source.CIRCLE, **fields,
+            )
         return ok(DeliveryZoneSerializer(zone).data)
 
 

@@ -135,6 +135,76 @@ def circle_to_polygon(lat, lng, radius_km, segments=64):
     return {'type': 'Polygon', 'coordinates': [ring]}
 
 
+def _orient(ax, ay, bx, by, cx, cy):
+    """Sign of the cross product: >0 left turn, <0 right turn, 0 collinear."""
+    value = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+    if abs(value) < 1e-12:
+        return 0
+    return 1 if value > 0 else -1
+
+
+def _segments_cross(p1, p2, p3, p4):
+    """Do segments p1p2 and p3p4 properly cross, or overlap while collinear?"""
+    d1 = _orient(p3[0], p3[1], p4[0], p4[1], p1[0], p1[1])
+    d2 = _orient(p3[0], p3[1], p4[0], p4[1], p2[0], p2[1])
+    d3 = _orient(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1])
+    d4 = _orient(p1[0], p1[1], p2[0], p2[1], p4[0], p4[1])
+    if d1 * d2 < 0 and d3 * d4 < 0:
+        return True
+    # A ring that doubles back along itself is as unanswerable for the
+    # containment test as a bow tie, so collinear overlap counts as crossing.
+    if d1 == d2 == d3 == d4 == 0:
+        return (_on_segment(p3[0], p3[1], p1[0], p1[1], p2[0], p2[1])
+                or _on_segment(p4[0], p4[1], p1[0], p1[1], p2[0], p2[1])
+                or _on_segment(p1[0], p1[1], p3[0], p3[1], p4[0], p4[1]))
+    return False
+
+
+# Past this the O(n²) pair scan stops paying for itself; such a ring comes from
+# an imported boundary, not from someone clicking a map.
+MAX_VALIDATED_POINTS = 400
+
+# ~1e-10 deg² is far under a square metre — anything smaller has no interior.
+MIN_RING_AREA_DEG2 = 1e-10
+
+
+def _open_ring(ring):
+    points = [(float(p[0]), float(p[1])) for p in ring]
+    if len(points) > 1 and points[0] == points[-1]:
+        points = points[:-1]
+    return points
+
+
+def ring_self_intersects(ring):
+    """Does this ring cross itself? (bow tie, figure eight, doubled edge)"""
+    points = _open_ring(ring)
+    count = len(points)
+    if count < 4 or count > MAX_VALIDATED_POINTS:
+        return False
+    for i in range(count):
+        a1, a2 = points[i], points[(i + 1) % count]
+        for j in range(i + 1, count):
+            # Neighbouring segments legitimately share an endpoint.
+            if (j + 1) % count == i or j == (i + 1) % count:
+                continue
+            if _segments_cross(a1, a2, points[j], points[(j + 1) % count]):
+                return True
+    return False
+
+
+def ring_area_deg2(ring):
+    """Unsigned shoelace area, in square degrees. Only used to spot a ring with
+    no real interior: repeated clicks, or every point on one line."""
+    points = _open_ring(ring)
+    count = len(points)
+    total = 0.0
+    for i in range(count):
+        x1, y1 = points[i]
+        x2, y2 = points[(i + 1) % count]
+        total += x1 * y2 - x2 * y1
+    return abs(total) / 2
+
+
 def validate_geometry(geometry):
     """Return a cleaned GeoJSON geometry or raise ValueError.
 
@@ -159,4 +229,12 @@ def validate_geometry(geometry):
             lng, lat = float(point[0]), float(point[1])
             if not (-180 <= lng <= 180) or not (-90 <= lat <= 90):
                 raise ValueError(f'coordinate out of range: [{lng}, {lat}]')
+
+        # A bow tie or a zero-area sliver saves happily but answers "is this
+        # customer inside?" nonsensically, so refuse it at the door.
+        if ring_area_deg2(ring) < MIN_RING_AREA_DEG2:
+            raise ValueError('zone has no area — the points are on one line or repeated')
+        if ring_self_intersects(ring):
+            raise ValueError('zone edges cross each other — untangle the shape')
+
     return geometry
