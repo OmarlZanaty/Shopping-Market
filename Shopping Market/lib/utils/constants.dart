@@ -4,8 +4,13 @@ class AppConfig {
   static const String baseUrl = 'https://63-186-157-245.sslip.io/api/v1';
   static const String wsBaseUrl = 'wss://63-186-157-245.sslip.io';
   static const String googleMapsApiKey = 'YOUR_GOOGLE_MAPS_API_KEY';
-  static const int connectTimeout = 60000;
-  static const int receiveTimeout = 60000;
+  // 60s was long enough that a single stalled call looked like a hang: the home
+  // screen fans out four requests and `_safe` retries each once, so a bad
+  // network could hold the spinner for ~2 minutes — "loading indefinitely" as
+  // far as App Review is concerned. Production answers all of these in <0.7s,
+  // so 20s is still far above any legitimate response time.
+  static const int connectTimeout = 20000;
+  static const int receiveTimeout = 20000;
 }
 
 /// Delivery-zone limits. Defaults are used offline / before the first fetch,

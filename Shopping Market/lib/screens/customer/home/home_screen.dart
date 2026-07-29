@@ -173,12 +173,23 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     try {
+      // Hard cap on the whole fan-out. `_safe` swallows *errors*, but a call
+      // that never completes would leave Future.wait pending forever and strand
+      // `_loading` at true — an infinite spinner on the screen the app lands on
+      // straight after login. That is indistinguishable, to a reviewer, from a
+      // login that "kept loading indefinitely" (App Review 2.1(a), build 22),
+      // and it is reached by every sign-in method.
       final results = await Future.wait([
         _safe(() => _api.getBanners(position: 'home_main'), <BannerModel>[]),
         _safe(() => _api.getCategories(),                  <CategoryModel>[]),
         _safe(() => _api.getProducts(featured: true),
               <String, dynamic>{'results': [], 'next': null}),
         _safe(() => _api.getAppSettings(),                 <String, dynamic>{}),
+      ]).timeout(const Duration(seconds: 25), onTimeout: () => [
+        <BannerModel>[],
+        <CategoryModel>[],
+        <String, dynamic>{'results': [], 'next': null},
+        <String, dynamic>{},
       ]);
       if (!mounted) return;
       final featuredData  = results[2] as Map<String, dynamic>;

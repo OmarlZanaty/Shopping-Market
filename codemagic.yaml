@@ -72,7 +72,7 @@ workflows:
           # problem and IS allowed to fail the build. That matters: the step
           # below is deliberately non-blocking, which meant nothing in CI could
           # actually stop a stuck-spinner build from shipping.
-          flutter test test/social_signin_spinner_test.dart
+          flutter test test/social_signin_spinner_test.dart test/keychain_hang_test.dart
       - name: iOS sign-in regression test (real iOS runtime, no device needed)
         script: |
           # Guards against a repeat of the App Review 2.1(a) rejections

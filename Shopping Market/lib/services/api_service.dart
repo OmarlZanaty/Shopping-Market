@@ -24,6 +24,48 @@ class ApiService {
   );
   late final Dio _dio;
 
+  /// Every Keychain access in this class goes through these three helpers.
+  ///
+  /// WHY THIS EXISTS: on iOS a Keychain operation can block without ever
+  /// returning *or* throwing. `read` is awaited inside the `onRequest`
+  /// interceptor below — BEFORE the request is dispatched — so Dio's
+  /// connect/receive timeouts have not started yet and can never fire.
+  /// `handler.next` is then never called, the request's future never
+  /// completes, and the caller spins forever with nothing to catch: not an
+  /// exception, just a future that never settles.
+  ///
+  /// That single await is shared by the demo-credential login, Sign in with
+  /// Apple, and every authenticated screen — which is exactly the shape App
+  /// Review reported for build 22: "kept loading indefinitely when trying to
+  /// login using the provided demo credentials or Sign in with Apple". Build
+  /// 22 bounded the Keychain *write* in AuthProvider.setAuthenticated; these
+  /// reads were left unbounded, so the same stall survived that fix.
+  ///
+  /// A hung Keychain therefore degrades to "no token" (→ a normal 401 the app
+  /// already handles) instead of an unkillable spinner. Failing open like this
+  /// matches what the interceptor already did for the *throwing* case.
+  static const _keychainTimeout = Duration(seconds: 5);
+
+  Future<String?> _readSecure(String key) async {
+    try {
+      return await _storage.read(key: key).timeout(_keychainTimeout);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeSecure(String key, String value) async {
+    try {
+      await _storage.write(key: key, value: value).timeout(_keychainTimeout);
+    } catch (_) {}
+  }
+
+  Future<void> _wipeSecure() async {
+    try {
+      await _storage.deleteAll().timeout(_keychainTimeout);
+    } catch (_) {}
+  }
+
   void init() {
     _dio = Dio(BaseOptions(
       baseUrl: AppConfig.baseUrl,
@@ -41,19 +83,20 @@ class ApiService {
                            '/auth/firebase-token/', '/auth/verify-otp/', '/auth/send-otp/',
                            '/auth/social/', '/auth/biometric/login/'];
           final isPublic = _noAuth.any((p) => options.path.contains(p));
-          final token = await _storage.read(key: StorageKeys.accessToken);
+          // Bounded: a Keychain read that HANGS (rather than throws) is not
+          // caught by the `catch` below, and would strand this interceptor
+          // before handler.next — see _readSecure's note.
+          final token = await _readSecure(StorageKeys.accessToken);
           if (token != null && !isPublic) {
             options.headers['Authorization'] = 'Bearer $token';
           }
         } catch (_) {
-          // Corrupt storage — ignore and proceed unauthenticated. deleteAll()
+          // Corrupt storage — ignore and proceed unauthenticated. The wipe
           // must itself be guarded: if it throws (iOS Keychain errors surface
           // here), the exception escapes this async callback, handler.next is
           // never reached, and Dio's request future NEVER completes — no
           // timeout, no error, just a spinner that hangs forever.
-          try {
-            await _storage.deleteAll();
-          } catch (_) {}
+          await _wipeSecure();
         }
         return handler.next(options);
       },
@@ -115,7 +158,7 @@ class ApiService {
     }
 
     // Retry with the new access token
-    final token = await _storage.read(key: StorageKeys.accessToken);
+    final token = await _readSecure(StorageKeys.accessToken);
     e.requestOptions.headers['Authorization'] = 'Bearer $token';
     try {
       return await _dio.fetch(e.requestOptions);
@@ -140,7 +183,7 @@ class ApiService {
 
   Future<bool> _doRefreshToken() async {
     try {
-      final refresh = await _storage.read(key: StorageKeys.refreshToken);
+      final refresh = await _readSecure(StorageKeys.refreshToken);
       if (refresh == null) return false;
 
       // Use a plain Dio (no auth interceptor) to avoid infinite retry loops.
@@ -161,7 +204,7 @@ class ApiService {
           final status = e.response?.statusCode;
           if (status == 401 || status == 403) {
             // Refresh token is genuinely expired / blacklisted — must log out.
-            await _storage.deleteAll();
+            await _wipeSecure();
             return false;
           }
           if (e.response != null) {
@@ -187,9 +230,9 @@ class ApiService {
         return false;
       }
 
-      await _storage.write(key: StorageKeys.accessToken, value: access as String);
+      await _writeSecure(StorageKeys.accessToken, access as String);
       if (newRefresh != null) {
-        await _storage.write(key: StorageKeys.refreshToken, value: newRefresh as String);
+        await _writeSecure(StorageKeys.refreshToken, newRefresh as String);
       }
       return true;
     } catch (_) {
@@ -483,14 +526,9 @@ class ApiService {
   /// The server-side call is fire-and-forget using a plain Dio (no interceptors)
   /// so a corrupt access token can't bounce through refresh logic.
   Future<void> logout() async {
-    String? refresh;
-    try {
-      refresh = await _storage.read(key: StorageKeys.refreshToken);
-    } catch (_) {}
+    final refresh = await _readSecure(StorageKeys.refreshToken);
     // 1) Local wipe — synchronous from the caller's perspective.
-    try {
-      await _storage.deleteAll();
-    } catch (_) {}
+    await _wipeSecure();
     // 2) Best-effort server notify. Plain Dio = no auth interceptor, no refresh
     //    loop, no validateStatus throws.
     if (refresh == null || refresh.isEmpty) return;
@@ -512,9 +550,7 @@ class ApiService {
   /// succeeds, since the access token becomes invalid server-side.
   Future<void> deleteAccount() async {
     await _dio.post('/auth/delete-account/');
-    try {
-      await _storage.deleteAll();
-    } catch (_) {}
+    await _wipeSecure();
   }
 
   Future<void> updateFcmToken(String fcmToken) async {
@@ -522,8 +558,8 @@ class ApiService {
   }
 
   Future<void> _saveTokens(String access, String refresh) async {
-    await _storage.write(key: StorageKeys.accessToken, value: access);
-    await _storage.write(key: StorageKeys.refreshToken, value: refresh);
+    await _writeSecure(StorageKeys.accessToken, access);
+    await _writeSecure(StorageKeys.refreshToken, refresh);
   }
 
   Future<UserModel> getProfile() async {
