@@ -17,17 +17,15 @@ import { ringsToLatLngs } from '../../utils/zoneGeometry';
 
 const CONTAINER = { width: '100%', height: '100%' };
 
-// Roads and labels matter when tracing a delivery boundary; everything else is
-// noise. This trims the map furniture without hiding street names.
+// Landmarks are how an admin actually knows where a boundary should run, so
+// nothing is hidden. POI clicks used to steal vertex drops, but clickableIcons
+// already handles that — styling the shops away as well only emptied the map
+// in the small towns where the few shops are the only landmarks there are.
 const MAP_OPTIONS = {
   streetViewControl: false,
   mapTypeControl: true,
   fullscreenControl: true,
   clickableIcons: false,          // stop POI clicks from stealing vertex drops
-  styles: [
-    { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
-    { featureType: 'transit', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-  ],
 };
 
 // Every ring, holes included — Google fills with the even-odd rule, so passing
