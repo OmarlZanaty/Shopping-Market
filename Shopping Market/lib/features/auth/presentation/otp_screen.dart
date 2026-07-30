@@ -115,48 +115,60 @@ class _OtpScreenState extends State<OtpScreen>
       return;
     }
 
-    await FirebaseAuth.instance.verifyPhoneNumber(
-      phoneNumber: e164,
-      forceResendingToken: _resendToken,
-      timeout: const Duration(seconds: 20),
-      verificationCompleted: (credential) async {
-        await _verifyCredential(credential);
-      },
-      verificationFailed: (e) async {
-        // Same transient iOS APNs-handshake race as the initial send — see
-        // phone_login_screen.dart's _startVerification for details.
-        if (!retried && e.code == 'notification-not-forwarded') {
-          await Future.delayed(const Duration(seconds: 2));
+    try {
+      await FirebaseAuth.instance.verifyPhoneNumber(
+        phoneNumber: e164,
+        forceResendingToken: _resendToken,
+        timeout: const Duration(seconds: 20),
+        verificationCompleted: (credential) async {
+          await _verifyCredential(credential);
+        },
+        verificationFailed: (e) async {
+          // Same transient iOS APNs-handshake race as the initial send — see
+          // phone_login_screen.dart's _startVerification for details.
+          if (!retried && e.code == 'notification-not-forwarded') {
+            await Future.delayed(const Duration(seconds: 2));
+            if (!mounted) return;
+            await _resend(retried: true);
+            return;
+          }
           if (!mounted) return;
-          await _resend(retried: true);
-          return;
-        }
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('فشل إعادة الإرسال: ${e.code}'),
-          backgroundColor: AppColors.errorRed,
-        ));
-      },
-      codeSent: (newVerificationId, newResendToken) {
-        if (!mounted) return;
-        setState(() {
-          _verificationId = newVerificationId;
-          _resendToken = newResendToken;
-        });
-        _startResendCountdown();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('تم إرسال الكود مجدداً'),
-          backgroundColor: AppColors.successGreen,
-        ));
-      },
-      codeAutoRetrievalTimeout: (_) {
-        // Android-only, and NOT an error — it only means the SMS auto-read
-        // window closed, which is expected whenever the user types the code
-        // themselves. It fires ~20s after a successful codeSent, so reporting
-        // "resend timed out" here (as build 16 did) contradicts the "code
-        // resent" confirmation the user just saw. See phone_login_screen.dart.
-      },
-    );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('فشل إعادة الإرسال: ${e.code}'),
+            backgroundColor: AppColors.errorRed,
+          ));
+        },
+        codeSent: (newVerificationId, newResendToken) {
+          if (!mounted) return;
+          setState(() {
+            _verificationId = newVerificationId;
+            _resendToken = newResendToken;
+          });
+          _startResendCountdown();
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('تم إرسال الكود مجدداً'),
+            backgroundColor: AppColors.successGreen,
+          ));
+        },
+        codeAutoRetrievalTimeout: (_) {
+          // Android-only, and NOT an error — it only means the SMS auto-read
+          // window closed, which is expected whenever the user types the code
+          // themselves. It fires ~20s after a successful codeSent, so reporting
+          // "resend timed out" here (as build 16 did) contradicts the "code
+          // resent" confirmation the user just saw. See phone_login_screen.dart.
+        },
+      );
+    } catch (_) {
+      // verifyPhoneNumber itself threw before any callback fired (e.g. a
+      // platform-level config error) — mirrors _startVerification's guard in
+      // phone_login_screen.dart so a resend failure surfaces instead of
+      // silently doing nothing.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('فشل إعادة الإرسال'),
+        backgroundColor: AppColors.errorRed,
+      ));
+    }
   }
 
   String get _code => _ctrls.map((c) => c.text).join();

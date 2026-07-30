@@ -52,13 +52,21 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
     };
 
+    // A hung Keychain read blocks forever without throwing on iOS (the same
+    // issue api_service.dart's _readSecure guards against) — bound it so a
+    // stuck read degrades to "no token" instead of stranding init() and the
+    // splash screen's auth resolution.
     String? token;
     try {
-      token = await _storage.read(key: StorageKeys.accessToken);
+      token = await _storage
+          .read(key: StorageKeys.accessToken)
+          .timeout(const Duration(seconds: 5));
     } catch (_) {
       // Corrupt secure storage (e.g. reinstall / keystore change) — wipe and
       // start fresh so the user can log in again cleanly.
-      await _storage.deleteAll();
+      try {
+        await _storage.deleteAll().timeout(const Duration(seconds: 5));
+      } catch (_) {}
     }
 
     if (token != null) {
@@ -159,9 +167,15 @@ class AuthProvider extends ChangeNotifier {
 
   // ─── Biometric ──────────────────────────────────────────────────────────
   Future<bool> get isBiometricAvailable async {
-    final available = await _localAuth.canCheckBiometrics;
-    final enrolled = await _localAuth.isDeviceSupported();
-    return available && enrolled;
+    try {
+      final available = await _localAuth.canCheckBiometrics
+          .timeout(const Duration(seconds: 5));
+      final enrolled = await _localAuth.isDeviceSupported()
+          .timeout(const Duration(seconds: 5));
+      return available && enrolled;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<bool> authenticateWithBiometric() async {

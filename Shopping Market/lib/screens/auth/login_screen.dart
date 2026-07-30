@@ -28,8 +28,19 @@ class _LoginScreenState extends State<LoginScreen> {
     final storage = const FlutterSecureStorage(
       aOptions: AndroidOptions(encryptedSharedPreferences: true),
     );
-    final token = await storage.read(key: StorageKeys.biometricToken);
-    final available = await auth.isBiometricAvailable;
+    String? token;
+    bool available = false;
+    try {
+      token = await storage
+          .read(key: StorageKeys.biometricToken)
+          .timeout(const Duration(seconds: 5));
+      available = await auth.isBiometricAvailable.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => false,
+      );
+    } catch (_) {
+      // Keychain/biometric hardware unavailable or hung — just skip the option.
+    }
     if (mounted) setState(() => _hasBiometric = available && token != null);
   }
 
