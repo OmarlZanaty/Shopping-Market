@@ -55,9 +55,34 @@ class _AuthInterceptor extends QueuedInterceptor {
   final Dio _dio;
   bool _isRefreshing = false;
 
+  /// See ApiService's copies: an iOS Keychain call can block without returning
+  /// or throwing, and the read in [onRequest] happens *before* the request is
+  /// dispatched, so Dio's own timeouts have not started and can never fire.
+  static const _keychainTimeout = Duration(seconds: 5);
+
+  Future<String?> _readSecure(String key) async {
+    try {
+      return await _storage.read(key: key).timeout(_keychainTimeout);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeSecure(String key, String value) async {
+    try {
+      await _storage.write(key: key, value: value).timeout(_keychainTimeout);
+    } catch (_) {}
+  }
+
+  Future<void> _wipeSecure() async {
+    try {
+      await _storage.deleteAll().timeout(_keychainTimeout);
+    } catch (_) {}
+  }
+
   @override
   Future<void> onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
-    final token = await _storage.read(key: SecureStorageKeys.accessToken);
+    final token = await _readSecure(SecureStorageKeys.accessToken);
     if (token != null) {
       options.headers['Authorization'] = 'Bearer $token';
     }
@@ -76,9 +101,10 @@ class _AuthInterceptor extends QueuedInterceptor {
     if (err.response?.statusCode == 401 && !isAuthEndpoint && !_isRefreshing) {
       _isRefreshing = true;
       try {
-        final refresh = await _storage.read(key: SecureStorageKeys.refreshToken);
+        final refresh = await _readSecure(SecureStorageKeys.refreshToken);
         if (refresh == null) {
-          await _storage.deleteAll();
+          await _wipeSecure();
+          _isRefreshing = false;
           return handler.next(err);
         }
         final res = await Dio().post(
@@ -89,10 +115,10 @@ class _AuthInterceptor extends QueuedInterceptor {
         final newAccess = res.data['access'] ?? res.data['data']?['access'];
         final newRefresh = res.data['refresh'] ?? res.data['data']?['refresh'];
         if (newAccess != null) {
-          await _storage.write(key: SecureStorageKeys.accessToken, value: newAccess);
+          await _writeSecure(SecureStorageKeys.accessToken, newAccess);
         }
         if (newRefresh != null) {
-          await _storage.write(key: SecureStorageKeys.refreshToken, value: newRefresh);
+          await _writeSecure(SecureStorageKeys.refreshToken, newRefresh);
         }
         // Retry original request with new token
         err.requestOptions.headers['Authorization'] = 'Bearer $newAccess';
@@ -101,7 +127,7 @@ class _AuthInterceptor extends QueuedInterceptor {
         return handler.resolve(retry);
       } catch (_) {
         _isRefreshing = false;
-        await _storage.deleteAll();
+        await _wipeSecure();
         return handler.next(err);
       }
     }

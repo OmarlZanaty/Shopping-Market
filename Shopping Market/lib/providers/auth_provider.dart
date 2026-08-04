@@ -22,6 +22,39 @@ class AuthProvider extends ChangeNotifier {
   );
   final _localAuth = LocalAuthentication();
 
+  /// Every Keychain access in this class goes through these three helpers, for
+  /// the same reason as [ApiService]'s copies: on iOS a Keychain operation can
+  /// block without ever returning *or* throwing, so a bare `await` on one is a
+  /// future that never settles — nothing to catch, no timeout to fire.
+  ///
+  /// This provider owns its own [FlutterSecureStorage] instance, separate from
+  /// ApiService's, so bounding the reads there did not cover these. Build 25
+  /// bounded [init]; the writes below still sat on the login paths, between a
+  /// successful API response and the `_status` flip that ends the spinner.
+  ///
+  /// A hung Keychain must cost a cache entry, never the login.
+  static const _keychainTimeout = Duration(seconds: 5);
+
+  Future<String?> _readSecure(String key) async {
+    try {
+      return await _storage.read(key: key).timeout(_keychainTimeout);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeSecure(String key, String value) async {
+    try {
+      await _storage.write(key: key, value: value).timeout(_keychainTimeout);
+    } catch (_) {}
+  }
+
+  Future<void> _wipeSecure() async {
+    try {
+      await _storage.deleteAll().timeout(_keychainTimeout);
+    } catch (_) {}
+  }
+
   AuthStatus _status = AuthStatus.unknown;
   UserModel? _user;
   bool _isLoading = false;
@@ -52,21 +85,23 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
     };
 
-    // A hung Keychain read blocks forever without throwing on iOS (the same
-    // issue api_service.dart's _readSecure guards against) — bound it so a
-    // stuck read degrades to "no token" instead of stranding init() and the
-    // splash screen's auth resolution.
+    // A hung Keychain read blocks forever without throwing on iOS — the timeout
+    // makes a stuck read degrade to "no token" instead of stranding init() and
+    // the splash screen's auth resolution.
+    //
+    // Spelled out rather than using _readSecure because the two outcomes differ
+    // here: only a *failed* read wipes storage. A successful read returning null
+    // is the ordinary logged-out case, and wiping there would destroy the
+    // biometric token on every cold start.
     String? token;
     try {
       token = await _storage
           .read(key: StorageKeys.accessToken)
-          .timeout(const Duration(seconds: 5));
+          .timeout(_keychainTimeout);
     } catch (_) {
       // Corrupt secure storage (e.g. reinstall / keystore change) — wipe and
       // start fresh so the user can log in again cleanly.
-      try {
-        await _storage.deleteAll().timeout(const Duration(seconds: 5));
-      } catch (_) {}
+      await _wipeSecure();
     }
 
     if (token != null) {
@@ -75,10 +110,7 @@ class AuthProvider extends ChangeNotifier {
         _user = await _api.getProfile();
         _status = AuthStatus.authenticated;
         // Persist the refreshed user data for offline fallback.
-        await _storage.write(
-          key: StorageKeys.userData,
-          value: jsonEncode(_user!.toJson()),
-        );
+        await _writeSecure(StorageKeys.userData, jsonEncode(_user!.toJson()));
         _pushFcmToken();
       } on DioException catch (e) {
         // ── 401 / 403: token is genuinely invalid → log out. ──────────────
@@ -106,7 +138,7 @@ class AuthProvider extends ChangeNotifier {
   /// if the cache is absent or corrupt.
   Future<AuthStatus> _restoreFromCache() async {
     try {
-      final cached = await _storage.read(key: StorageKeys.userData);
+      final cached = await _readSecure(StorageKeys.userData);
       if (cached == null || cached.isEmpty) return AuthStatus.unauthenticated;
       _user = UserModel.fromJson(jsonDecode(cached) as Map<String, dynamic>);
       return AuthStatus.authenticated;
@@ -121,7 +153,10 @@ class AuthProvider extends ChangeNotifier {
       final data = await _api.login(phone, password);
 
       _user = UserModel.fromJson(data['user']);
-      await _storage.write(key: StorageKeys.userData, value: jsonEncode(data['user']));
+      // Bounded: this write sits between a login that already succeeded and the
+      // `_status` flip below that ends the spinner. An unbounded hang here is
+      // exactly the 2.1(a) symptom App Review saw with the demo credentials.
+      await _writeSecure(StorageKeys.userData, jsonEncode(data['user']));
       _status = AuthStatus.authenticated;
       _error = null;
       notifyListeners();
@@ -200,7 +235,7 @@ class AuthProvider extends ChangeNotifier {
         _error = 'Biometric authentication failed';
         return false;
       }
-      final token = await _storage.read(key: StorageKeys.biometricToken);
+      final token = await _readSecure(StorageKeys.biometricToken);
       if (token == null) {
         _error = 'Biometric not registered';
         return false;
@@ -227,7 +262,7 @@ class AuthProvider extends ChangeNotifier {
       // Generate a unique token for this device
       final token = '${_user!.id}_${DateTime.now().millisecondsSinceEpoch}';
       await _api.registerBiometric(token);
-      await _storage.write(key: StorageKeys.biometricToken, value: token);
+      await _writeSecure(StorageKeys.biometricToken, token);
       return true;
     } catch (_) {
       return false;
@@ -265,12 +300,7 @@ class AuthProvider extends ChangeNotifier {
       _error = null;
       notifyListeners();
       // Persist + push FCM, same as the OTP/biometric paths.
-      try {
-        await _storage.write(
-          key: StorageKeys.userData,
-          value: jsonEncode(_user!.toJson()),
-        );
-      } catch (_) {}
+      await _writeSecure(StorageKeys.userData, jsonEncode(_user!.toJson()));
       _pushFcmToken();
       return SocialLoginResult.success;
     } on SocialNeedsPhoneException {
@@ -301,14 +331,7 @@ class AuthProvider extends ChangeNotifier {
     // navigating — that is what left App Review's OTP spinner running forever
     // after a sign-in that had already succeeded. A hang here must cost a cache
     // entry, never the login.
-    try {
-      await _storage
-          .write(
-            key: StorageKeys.userData,
-            value: jsonEncode(user.toJson()),
-          )
-          .timeout(const Duration(seconds: 5));
-    } catch (_) {} // storage failure must never break the login flow
+    await _writeSecure(StorageKeys.userData, jsonEncode(user.toJson()));
     _pushFcmToken();
   }
 

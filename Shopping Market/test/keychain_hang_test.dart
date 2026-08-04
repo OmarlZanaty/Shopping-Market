@@ -22,6 +22,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:market_fresh/providers/auth_provider.dart';
 import 'package:market_fresh/services/api_service.dart';
 
 const _secureStorageChannel =
@@ -48,6 +49,28 @@ void main() {
     // this future must complete. Before the fix it never did.
     await expectLater(
       ApiService().getCategories().then((_) => 'settled').catchError((_) => 'settled'),
+      completion('settled'),
+    );
+  }, timeout: const Timeout(Duration(seconds: 60)));
+
+  // AuthProvider holds its OWN FlutterSecureStorage instance, separate from
+  // ApiService's — which is why bounding the reads above did not cover it, and
+  // why the spinner survived into build 25. init() runs at cold start and gates
+  // the splash screen's auth resolution: if it never returns, the app never
+  // leaves the spinner. That is the "first install" condition App Review kept
+  // hitting on the iPad.
+  test('a Keychain that never answers cannot strand AuthProvider.init', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      _secureStorageChannel,
+      (call) => Completer<Object?>().future, // hangs forever, never throws
+    );
+
+    // No ApiService().init() here: with the Keychain hung the token read yields
+    // null, so init() resolves to "unauthenticated" without dispatching a
+    // request. (ApiService is a singleton — init() twice throws.)
+    await expectLater(
+      AuthProvider().init().then((_) => 'settled').catchError((_) => 'settled'),
       completion('settled'),
     );
   }, timeout: const Timeout(Duration(seconds: 60)));
