@@ -11,6 +11,7 @@ one are skipped unless --force is given.
     python manage.py backfill_thumbnails --force        # regenerate all
 """
 from django.core.management.base import BaseCommand
+from django.db.models import Q
 
 from apps.products.models import Product
 from apps.products.thumbnails import ensure_thumbnail
@@ -28,7 +29,9 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         qs = Product.objects.exclude(main_image='').exclude(main_image__isnull=True)
         if not opts['force']:
-            qs = qs.filter(thumbnail__in=['', None])
+            # NULL never matches an IN list in SQL, and every pre-existing row
+            # has thumbnail NULL — so this has to be an explicit isnull test.
+            qs = qs.filter(Q(thumbnail='') | Q(thumbnail__isnull=True))
         if opts['limit']:
             qs = qs[:opts['limit']]
 
