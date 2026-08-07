@@ -1010,6 +1010,9 @@ class _CartItemCard extends StatelessWidget {
           child: SizedBox(width: 72, height: 72,
             child: hasImage
               ? CachedNetworkImage(imageUrl: p.mainImageUrl, fit: BoxFit.cover,
+                  // Drawn in a 72px box — decoding the full image for it is
+                  // pure waste, and a long cart holds many of them at once.
+                  memCacheWidth: 200,
                   placeholder: (_, __) => _imgPlaceholder(),
                   errorWidget: (_, __, ___) => _imgPlaceholder())
               : _imgPlaceholder()),

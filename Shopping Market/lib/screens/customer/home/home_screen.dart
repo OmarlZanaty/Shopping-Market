@@ -933,6 +933,7 @@ class _CategoryCardState extends State<_CategoryCard>
                           imageUrl: cat.imageUrl!,
                           fit: BoxFit.cover,
                           width: double.infinity,
+                          memCacheWidth: 250,   // category chip, not a hero
                           placeholder: (_, __) => _iconFallback(cat, widget.selected),
                           errorWidget: (_, __, ___) => _iconFallback(cat, widget.selected),
                         )
@@ -1378,6 +1379,7 @@ class _SearchResultCard extends StatelessWidget {
                       child: p.mainImageUrl.isNotEmpty
                           ? CachedNetworkImage(
                               imageUrl: p.mainImageUrl, fit: BoxFit.cover,
+                              memCacheWidth: 250,   // drawn in an 88px box
                               placeholder: (_, __) => _imgFallback(),
                               errorWidget: (_, __, ___) => _imgFallback())
                           : _imgFallback(),
@@ -1604,6 +1606,7 @@ class _AiProductCard extends StatelessWidget {
                     ? CachedNetworkImage(
                         imageUrl: p.mainImageUrl,
                         fit: BoxFit.cover,
+                        memCacheWidth: 400,   // a 100px-tall horizontal tile
                         placeholder: (_, __) => Container(color: AppColors.ice),
                         errorWidget: (_, __, ___) => Container(
                           color: AppColors.ice,

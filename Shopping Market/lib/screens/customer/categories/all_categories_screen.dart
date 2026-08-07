@@ -278,6 +278,7 @@ class _CategoryCard extends StatelessWidget {
                         imageUrl: cat.imageUrl!,
                         fit: BoxFit.cover,
                         width: double.infinity,
+                        memCacheWidth: 250,
                         placeholder: (_, __) => _fallback(selected),
                         errorWidget: (_, __, ___) => _fallback(selected),
                       )

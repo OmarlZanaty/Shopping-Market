@@ -134,6 +134,12 @@ class _ImageSection extends StatelessWidget {
               ? CachedNetworkImage(
                   imageUrl: p.mainImageUrl,
                   fit: BoxFit.cover,
+                  // A card draws this at roughly 150 logical px. With no decode
+                  // width Flutter holds the full bitmap: a 450x800 image is
+                  // ~1.4 MB of RAM, so a screen of twenty costs ~28 MB, and
+                  // that decode work is what janks the first frame on open.
+                  memCacheWidth: 400,
+                  maxWidthDiskCache: 600,
                   placeholder: (_, __) => const _ImagePlaceholder(),
                   errorWidget: (_, __, ___) => const _ImagePlaceholder(),
                 )
