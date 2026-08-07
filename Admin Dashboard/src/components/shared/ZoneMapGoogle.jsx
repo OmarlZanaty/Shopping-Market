@@ -73,7 +73,7 @@ export default function ZoneMapGoogle({
 
   if (loadError) {
     return (
-      <div className="h-full flex items-center justify-center text-sm text-red-600 p-6 text-center">
+      <div className="h-full flex items-center justify-center text-sm text-red bg-card p-6 text-center">
         تعذّر تحميل خرائط Google — تأكد من صلاحية المفتاح وتفعيل Maps JavaScript API.
         <br />Google Maps failed to load — check the key and that Maps JavaScript API is enabled.
       </div>
@@ -81,8 +81,8 @@ export default function ZoneMapGoogle({
   }
   if (!isLoaded) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <div className="animate-spin w-7 h-7 border-4 border-[#2E5E99] border-t-transparent rounded-full" />
+      <div className="h-full flex items-center justify-center bg-card">
+        <div className="animate-spin w-7 h-7 border-4 border-orange border-t-transparent rounded-full" />
       </div>
     );
   }

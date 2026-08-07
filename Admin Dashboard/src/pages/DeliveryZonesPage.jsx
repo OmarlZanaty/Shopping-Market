@@ -165,10 +165,10 @@ export default function DeliveryZonesPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-[#0D2440]">
+          <h1 className="text-xl font-bold text-text">
             🗺️ {t('مناطق التوصيل', 'Delivery Zones')}
           </h1>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-muted mt-1">
             {hasZones
               ? t('المناطق المرسومة تحل محل نطاق الكيلومترات لهذا الفرع.',
                   'Drawn zones replace the km radius for this branch.')
@@ -181,7 +181,7 @@ export default function DeliveryZonesPage() {
           <select
             value={branchId || ''}
             onChange={(e) => { setBranchId(Number(e.target.value)); resetDraw(); }}
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm"
+            className="bg-input-bg border border-input-border text-text rounded-xl px-3 py-2 text-sm"
           >
             {branches.map((b) => (
               <option key={b.id} value={b.id}>
@@ -193,12 +193,12 @@ export default function DeliveryZonesPage() {
           {!drawing && (
             <>
               <button onClick={startNew}
-                className="bg-[#2FBE8F] hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold">
+                className="bg-green hover:bg-green/90 text-white px-4 py-2 rounded-xl text-sm font-bold">
                 ✏️ {t('ارسم منطقة', 'Draw a zone')}
               </button>
               {radiusKm > 0 && radiusKm <= 50 && (
                 <button onClick={() => fromRadius.mutate()} disabled={fromRadius.isPending}
-                  className="border border-gray-200 hover:bg-gray-50 text-[#2E5E99] px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-40">
+                  className="border border-divider hover:bg-card-hover text-blue px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-40">
                   ⭕ {t('حوّل النطاق الحالي', 'Convert current radius')}
                 </button>
               )}
@@ -208,15 +208,15 @@ export default function DeliveryZonesPage() {
       </div>
 
       {!MAPS_KEY && (
-        <div className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-3 py-2">
+        <div className="text-xs bg-gold/10 border border-gold/30 text-gold rounded-xl px-3 py-2">
           {t('خرائط Google غير مفعّلة — أضف VITE_GOOGLE_MAPS_API_KEY لاستخدامها. الخريطة الحالية OpenStreetMap.',
              'Google Maps is not configured — set VITE_GOOGLE_MAPS_API_KEY to enable it. Showing OpenStreetMap.')}
         </div>
       )}
 
       {drawing && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3 flex-wrap">
-          <span className="text-sm text-emerald-900 font-semibold">
+        <div className="bg-card border border-green/40 rounded-2xl p-4 flex items-center gap-3 flex-wrap">
+          <span className="text-sm text-text font-semibold">
             {t('اضغط على الخريطة لإضافة نقاط. اسحب نقطة لتعديلها، واضغط عليها لحذفها.',
                'Click the map to add points. Drag a point to move it, click it to delete it.')}
           </span>
@@ -224,59 +224,59 @@ export default function DeliveryZonesPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t('اسم المنطقة', 'Zone name')}
-            className="border border-emerald-200 rounded-xl px-3 py-1.5 text-sm flex-1 min-w-[160px]"
+            className="bg-input-bg border border-input-border text-text placeholder-muted rounded-xl px-3 py-1.5 text-sm flex-1 min-w-[160px]"
           />
-          <span className="text-xs text-emerald-700">{draft.length} {t('نقطة', 'points')}</span>
+          <span className="text-xs text-muted">{draft.length} {t('نقطة', 'points')}</span>
           <button onClick={() => setDraft((p) => p.slice(0, -1))} disabled={!draft.length}
-            className="text-sm px-3 py-1.5 rounded-xl border border-emerald-200 disabled:opacity-40">
+            className="text-sm px-3 py-1.5 rounded-xl border border-divider text-text hover:bg-card-hover disabled:opacity-40">
             ↩️ {t('تراجع', 'Undo')}
           </button>
           <button onClick={submit} disabled={saveZone.isPending}
-            className="bg-[#2FBE8F] hover:bg-emerald-600 text-white px-4 py-1.5 rounded-xl text-sm font-bold disabled:opacity-40">
+            className="bg-green hover:bg-green/90 text-white px-4 py-1.5 rounded-xl text-sm font-bold disabled:opacity-40">
             ✅ {t('حفظ', 'Save')}
           </button>
-          <button onClick={resetDraw} className="text-sm px-3 py-1.5 rounded-xl text-gray-500 hover:bg-white">
+          <button onClick={resetDraw} className="text-sm px-3 py-1.5 rounded-xl text-muted hover:bg-card-hover hover:text-text">
             {t('إلغاء', 'Cancel')}
           </button>
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        <div className="lg:col-span-3 rounded-2xl overflow-hidden border border-gray-100" style={{ height: '65vh' }}>
+        <div className="lg:col-span-3 rounded-2xl overflow-hidden border border-divider" style={{ height: '65vh' }}>
           <MapImpl {...mapProps} />
         </div>
 
         <div className="space-y-2">
-          <div className="text-sm font-bold text-[#0D2440]">
+          <div className="text-sm font-bold text-text">
             {t('المناطق', 'Zones')} ({zones.length})
           </div>
           {zones.length === 0 && (
-            <div className="text-xs text-gray-400 border border-dashed border-gray-200 rounded-xl p-4 text-center">
+            <div className="text-xs text-muted border border-dashed border-divider rounded-xl p-4 text-center">
               {t('لا توجد مناطق لهذا الفرع', 'No zones for this branch')}
             </div>
           )}
           {zones.map((zone) => (
-            <div key={zone.id} className="border border-gray-100 rounded-xl px-3 py-2.5 text-sm">
+            <div key={zone.id} className="bg-card border border-divider rounded-xl px-3 py-2.5 text-sm">
               <div className="flex items-center justify-between gap-2">
-                <span className={`font-semibold ${zone.is_active ? 'text-[#0D2440]' : 'text-gray-400 line-through'}`}>
+                <span className={`font-semibold ${zone.is_active ? 'text-text' : 'text-muted line-through'}`}>
                   {zone.name_ar}
                 </span>
-                <span className="text-[10px] text-gray-400">
+                <span className="text-[10px] text-muted">
                   {zone.source === 'circle' ? t('من النطاق', 'from radius') : t('مرسومة', 'drawn')}
                 </span>
               </div>
               <div className="flex gap-3 mt-1.5 text-xs">
-                <button onClick={() => startEdit(zone)} className="text-[#2E5E99] font-semibold">
+                <button onClick={() => startEdit(zone)} className="text-blue font-semibold">
                   {t('تعديل', 'Edit')}
                 </button>
                 <button
                   onClick={() => toggleZone.mutate({ id: zone.id, is_active: !zone.is_active })}
-                  className="text-amber-600 font-semibold">
+                  className="text-gold font-semibold">
                   {zone.is_active ? t('إيقاف', 'Disable') : t('تفعيل', 'Enable')}
                 </button>
                 <button
                   onClick={() => window.confirm(t('حذف هذه المنطقة؟', 'Delete this zone?')) && removeZone.mutate(zone.id)}
-                  className="text-red-500 font-semibold">
+                  className="text-red font-semibold">
                   {t('حذف', 'Delete')}
                 </button>
               </div>
