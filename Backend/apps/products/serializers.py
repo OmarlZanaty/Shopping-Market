@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import Product, Category, Banner, MediaLibrary, ProductImage, ProductBranch
+from .thumbnails import ensure_thumbnail
 from apps.core.validators import validate_image_upload, validate_hex_color, optimize_image_file
 
 
@@ -89,10 +90,22 @@ class ProductListSerializer(serializers.ModelSerializer):
         return list(obj.categories.values_list('id', flat=True))
 
     def get_main_image_url(self, obj):
+        """The image a *list* should load — the thumbnail when one exists.
+
+        Deliberately the same field name the app already reads, so every phone
+        with the app installed gets the small image without an update. The
+        detail serializer overrides this back to the full-size original.
+        """
+        request = self.context.get('request')
+        if obj.thumbnail:
+            try:
+                url = obj.thumbnail.url
+                return request.build_absolute_uri(url) if request else url
+            except Exception:
+                pass
         if obj.image_url_s3:
             return obj.image_url_s3
         if obj.main_image:
-            request = self.context.get('request')
             if request:
                 try:
                     return request.build_absolute_uri(obj.main_image.url)
@@ -121,6 +134,20 @@ class ProductSerializer(ProductListSerializer):
             'alternatives', 'related', 'savings', 'waitlist_count',
             'is_out_of_stock', 'is_low_stock',
         ]
+
+    def get_main_image_url(self, obj):
+        """Full resolution: the detail screen is where the image is actually
+        looked at, and it loads exactly one."""
+        if obj.image_url_s3:
+            return obj.image_url_s3
+        if obj.main_image:
+            request = self.context.get('request')
+            if request:
+                try:
+                    return request.build_absolute_uri(obj.main_image.url)
+                except Exception:
+                    pass
+        return ''
 
     def get_alternatives(self, obj):
         alts = obj.alternative_products.filter(is_available=True)[:5]
@@ -191,6 +218,7 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         if m2m_related is not None:
             product.related_products.set(m2m_related)
         self._set_m2m(product, category_ids, alternative_ids, related_ids, branch_stock)
+        ensure_thumbnail(product)
         return product
 
     def update(self, instance, validated_data):
@@ -204,9 +232,12 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         m2m_related = validated_data.pop('related_products', None)
         # A freshly uploaded file must win over any cached external URL,
         # otherwise the stale image_url_s3 keeps being served.
-        if validated_data.get('main_image'):
+        new_image = bool(validated_data.get('main_image'))
+        if new_image:
             instance.image_url_s3 = ''
             instance.thumbnail_url = ''
+            # The old thumbnail is of the old picture — regenerate below.
+            instance.thumbnail = None
         for attr, val in validated_data.items():
             setattr(instance, attr, val)
         instance.save()
@@ -217,6 +248,8 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         if m2m_related is not None:
             instance.related_products.set(m2m_related)
         self._set_m2m(instance, category_ids, alternative_ids, related_ids, branch_stock)
+        if new_image:
+            ensure_thumbnail(instance, force=True)
         return instance
 
     def _set_m2m(self, product, category_ids, alternative_ids, related_ids, branch_stock):

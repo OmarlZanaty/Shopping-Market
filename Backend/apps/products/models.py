@@ -99,6 +99,11 @@ class Product(models.Model):
     main_image = models.ImageField(upload_to='products/', null=True, blank=True)
     image_url_s3 = models.URLField(blank=True)
     thumbnail_url = models.URLField(blank=True)
+    # A ~300px WebP of main_image, served to list screens. The full image is
+    # 450x800 and lists draw it at about 150px, so this is the difference
+    # between a grid costing ~1 MB and one costing ~150 KB. Written by
+    # thumbnails.ensure_thumbnail; blank simply means "serve the full image".
+    thumbnail = models.ImageField(upload_to='products/thumbs/', null=True, blank=True)
 
     # Self-relations
     related_products = models.ManyToManyField('self', blank=True, symmetrical=False, related_name='related_to')
