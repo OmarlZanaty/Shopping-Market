@@ -5,7 +5,10 @@ import toast from 'react-hot-toast';
 import { branchApi, zoneApi } from '../services/api';
 import ZoneMapGoogle from '../components/shared/ZoneMapGoogle';
 import ZoneMapLeaflet from '../components/shared/ZoneMapLeaflet';
-import { buildGeometry, editableRing, hasExtraParts } from '../utils/zoneGeometry';
+import {
+  buildGeometry, editableRing, hasExtraParts,
+  ringSelfIntersects, ringArea, MIN_RING_AREA,
+} from '../utils/zoneGeometry';
 
 /**
  * Delivery zones — draw the area a branch delivers to, instead of a radius.
@@ -20,6 +23,23 @@ import { buildGeometry, editableRing, hasExtraParts } from '../utils/zoneGeometr
  */
 
 const unwrap = (res) => (res?.data?.success !== undefined ? res.data.data : res?.data);
+
+/**
+ * The reason a save failed, not the envelope's generic label.
+ *
+ * A DRF field error arrives as { message: 'Request error', errors: [{field,
+ * message}] } — showing only `message` told the admin "Request error" while the
+ * actual "zone edges cross each other" sat one key away.
+ */
+const apiError = (error, fallback) => {
+  const data = error?.response?.data;
+  const fields = Array.isArray(data?.errors)
+    ? data.errors.map((item) => item?.message).filter(Boolean)
+    : [];
+  if (fields.length) return fields.join(' — ');
+  const message = data?.message;
+  return message && message !== 'Request error' ? message : fallback;
+};
 
 const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
@@ -75,7 +95,7 @@ export default function DeliveryZonesPage() {
   const saveZone = useMutation({
     mutationFn: ({ id, payload }) => (id ? zoneApi.update(id, payload) : zoneApi.create(payload)),
     onSuccess: () => { toast.success(t('تم حفظ المنطقة ✅', 'Zone saved ✅')); resetDraw(); invalidate(); },
-    onError: (e) => toast.error(e?.response?.data?.message || t('فشل الحفظ', 'Save failed')),
+    onError: (e) => toast.error(apiError(e, t('فشل الحفظ', 'Save failed'))),
   });
 
   const removeZone = useMutation({
@@ -91,7 +111,7 @@ export default function DeliveryZonesPage() {
   const fromRadius = useMutation({
     mutationFn: () => zoneApi.fromRadius(branchId),
     onSuccess: () => { toast.success(t('تم إنشاء المنطقة', 'Zone created')); invalidate(); },
-    onError: (e) => toast.error(e?.response?.data?.message || t('فشل', 'Failed')),
+    onError: (e) => toast.error(apiError(e, t('فشل', 'Failed'))),
   });
 
   const startNew = () => {
@@ -125,8 +145,20 @@ export default function DeliveryZonesPage() {
       return points.filter((_, i) => i !== index);
     });
 
+  // The server refuses a crossed or empty ring; say so while the shape is still
+  // on screen instead of letting it come back as a 400.
+  const crossed = draft.length >= 4 && ringSelfIntersects(draft);
+
   const submit = () => {
     if (draft.length < 3) return toast.error(t('ارسم 3 نقاط على الأقل', 'Draw at least 3 points'));
+    if (crossed) {
+      return toast.error(t('حواف المنطقة متقاطعة — اسحب النقاط حتى لا تتقاطع الخطوط',
+                           'The zone edges cross each other — drag the points so no lines overlap'));
+    }
+    if (ringArea(draft) < MIN_RING_AREA) {
+      return toast.error(t('المنطقة بلا مساحة — النقاط على خط واحد أو مكرّرة',
+                           'The zone has no area — the points are on one line or repeated'));
+    }
     if (!name.trim()) return toast.error(t('اكتب اسم المنطقة', 'Name the zone'));
     saveZone.mutate({
       id: editingId,
@@ -227,6 +259,11 @@ export default function DeliveryZonesPage() {
             className="bg-input-bg border border-input-border text-text placeholder-muted rounded-xl px-3 py-1.5 text-sm flex-1 min-w-[160px]"
           />
           <span className="text-xs text-muted">{draft.length} {t('نقطة', 'points')}</span>
+          {crossed && (
+            <span className="text-xs text-red font-semibold">
+              ⚠️ {t('الخطوط متقاطعة', 'edges cross')}
+            </span>
+          )}
           <button onClick={() => setDraft((p) => p.slice(0, -1))} disabled={!draft.length}
             className="text-sm px-3 py-1.5 rounded-xl border border-divider text-text hover:bg-card-hover disabled:opacity-40">
             ↩️ {t('تراجع', 'Undo')}
