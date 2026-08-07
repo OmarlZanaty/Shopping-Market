@@ -28,9 +28,10 @@ THUMB_QUALITY = 80
 
 
 def _thumb_name(source_name):
-    base = os.path.basename(source_name)
-    stem, _ = os.path.splitext(base)
-    return f'thumbs/{stem}.webp'
+    # Filename only: the field's upload_to already puts it under
+    # products/thumbs/, and returning a path here nested it twice.
+    stem, _ = os.path.splitext(os.path.basename(source_name))
+    return f'{stem}.webp'
 
 
 def build_thumbnail(image_field):
