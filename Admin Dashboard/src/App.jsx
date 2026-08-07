@@ -25,6 +25,7 @@ const NotificationsPage  = lazy(() => import('./pages/NotificationsPage'));
 const SettingsPage       = lazy(() => import('./pages/SettingsPage'));
 const LoyaltyPage        = lazy(() => import('./pages/LoyaltyPage'));
 const AdminManagement    = lazy(() => import('./pages/AdminManagementPage'));
+const ReportsPage        = lazy(() => import('./pages/ReportsPage'));
 const SalesPage          = lazy(() => import('./pages/analytics/SalesPage'));
 const DriversAnalytics   = lazy(() => import('./pages/analytics/DriversPage'));
 const InventoryPage      = lazy(() => import('./pages/analytics/InventoryPage'));
@@ -70,6 +71,7 @@ export default function App() {
             <Route path="settings"              element={<S><SettingsPage /></S>} />
             <Route path="loyalty"               element={<S><LoyaltyPage /></S>} />
             <Route path="admin-management"      element={<S><AdminManagement /></S>} />
+            <Route path="reports"               element={<S><ReportsPage /></S>} />
             <Route path="analytics/sales"       element={<S><SalesPage /></S>} />
             <Route path="analytics/drivers"     element={<S><DriversAnalytics /></S>} />
             <Route path="analytics/inventory"   element={<S><InventoryPage /></S>} />

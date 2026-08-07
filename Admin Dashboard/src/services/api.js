@@ -172,3 +172,16 @@ export const zoneApi = {
     api.post(`/branches/admin/${branchId}/zone-from-radius/`, data),
   check: (lat, lng) => api.get('/branches/coverage/', { params: { lat, lng } }),
 };
+
+// Reports. Every report takes the same params (from_date, to_date, page, limit)
+// and the same ?export=xlsx|pdf switch, so one pair of helpers covers all of
+// them — `slug` is the path segment, e.g. 'sales-summary'.
+export const reportApi = {
+  rows: (slug, params) => api.get(`/reports/${slug}/`, { params }),
+  download: (slug, params, format) =>
+    api.get(`/reports/${slug}/`, {
+      params: { ...params, export: format },
+      responseType: 'blob',
+      timeout: 120000,
+    }),
+};

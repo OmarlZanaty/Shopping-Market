@@ -26,6 +26,7 @@ const NAV = [
   { path: '/branches',            icon: '🏪', label_ar: 'الفروع',           label_en: 'Branches' },
   { path: '/delivery-zones',      icon: '🗺️', label_ar: 'مناطق التوصيل',    label_en: 'Delivery Zones' },
   { divider: true, label_ar: 'التقارير', label_en: 'Reports' },
+  { path: '/reports',             icon: '📊', label_ar: 'التقارير والتصدير', label_en: 'Reports & Export' },
   { path: '/analytics/sales',     icon: '💰', label_ar: 'المبيعات',         label_en: 'Sales' },
   { path: '/analytics/drivers',   icon: '⚡', label_ar: 'أداء المناديب',    label_en: 'Driver Perf' },
   { path: '/analytics/inventory', icon: '📦', label_ar: 'المخزون',          label_en: 'Inventory' },

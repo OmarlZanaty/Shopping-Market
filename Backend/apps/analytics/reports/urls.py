@@ -3,6 +3,7 @@ from . import views as r
 
 urlpatterns = [
     path('sales/',              r.SalesReport.as_view(),           name='sales'),
+    path('sales-summary/',      r.SalesSummaryReport.as_view(),    name='sales-summary'),
     path('payments/',           r.PaymentsReport.as_view(),        name='payments'),
     path('out-of-stock/',       r.OutOfStockReport.as_view(),      name='out-of-stock'),
     path('cancelled-orders/',   r.CancelledOrdersReport.as_view(), name='cancelled'),

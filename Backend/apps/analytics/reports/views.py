@@ -533,3 +533,54 @@ class DailyRevenueReport(ReportBase):
             if pm in row:
                 row[pm] += float(o.amount_collected or o.total_amount or 0)
         return sorted(agg.values(), key=lambda r: r['date'])
+
+
+# ───────── 13. Sales summary (إجمالي المبيعات) ──────────────────────────────
+
+class SalesSummaryReport(ReportBase):
+    """One row per order — the owner's إجمالي المبيعات sheet.
+
+    Distinct from SalesReport, which is one row per *line item* (تفاصيل
+    المبيعات). Everything here already lives on Order; the only computed
+    column is the preparation time, from accepted_at → out_for_delivery_at.
+    """
+    title = 'Sales Summary'
+    base_filename = 'sales_summary'
+    columns = [
+        {'key': 'order_number',   'label': 'Order #'},
+        {'key': 'date',           'label': 'Date'},
+        {'key': 'amount',         'label': 'Amount'},
+        {'key': 'payment_method', 'label': 'Cash / Online'},
+        {'key': 'preparer',       'label': 'Preparer'},
+        {'key': 'prep_mins',      'label': 'Prep Time (min)'},
+        {'key': 'points_earned',  'label': 'Loyalty Points'},
+        {'key': 'items_count',    'label': 'Products'},
+    ]
+
+    def build_rows(self, request):
+        from_d, to_d = _date_range(request)
+        qs = (Order.objects
+              .filter(status='delivered',
+                      created_at__date__gte=from_d,
+                      created_at__date__lte=to_d)
+              .select_related('preparer')
+              .annotate(items_count=Count('items')))
+        qs = scope_to_user(qs, request.user, branch_field='branch_id')
+        rows = []
+        for o in qs.order_by('created_at'):
+            # An order that was never accepted or never left the shop has no
+            # preparation window — blank reads better than a fake zero.
+            prep = ''
+            if o.accepted_at and o.out_for_delivery_at:
+                prep = round((o.out_for_delivery_at - o.accepted_at).total_seconds() / 60.0, 1)
+            rows.append({
+                'order_number': o.order_number,
+                'date': o.created_at.date(),
+                'amount': float(o.total_amount or 0),
+                'payment_method': o.payment_method,
+                'preparer': o.preparer.full_name if o.preparer else '',
+                'prep_mins': prep,
+                'points_earned': int(o.points_earned or 0),
+                'items_count': int(o.items_count or 0),
+            })
+        return rows
