@@ -127,16 +127,33 @@ export default function ReportsPage() {
     return key.replace(/_/g, ' ');
   };
 
+  const save = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const download = async (format) => {
     setDownloading(format);
     try {
       const res = await reportApi.download(slug, params, format);
-      const url = URL.createObjectURL(res.data);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${slug}_${fromDate}_${toDate}.${format}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      save(res.data, `${slug}_${fromDate}_${toDate}.${format}`);
+    } catch (e) {
+      toast.error(apiError(e, t('فشل التصدير', 'Export failed')));
+    } finally {
+      setDownloading('');
+    }
+  };
+
+  // Thirteen reports, one file — the range is whatever is on screen.
+  const downloadAll = async () => {
+    setDownloading('all');
+    try {
+      const res = await reportApi.downloadAll({ from_date: fromDate, to_date: toDate });
+      save(res.data, `all_reports_${fromDate}_${toDate}.xlsx`);
     } catch (e) {
       toast.error(apiError(e, t('فشل التصدير', 'Export failed')));
     } finally {
@@ -206,6 +223,17 @@ export default function ReportsPage() {
           className="bg-red hover:bg-red/90 text-white px-4 py-2 rounded-xl text-sm font-bold disabled:opacity-40"
         >
           {downloading === 'pdf' ? '...' : `📕 ${t('تصدير PDF', 'Export PDF')}`}
+        </button>
+        {/* Not gated on `rows`: this one covers every report, so an empty
+            table for the report on screen says nothing about the rest. */}
+        <button
+          onClick={downloadAll}
+          disabled={!!downloading}
+          className="bg-blue hover:bg-blue/90 text-white px-4 py-2 rounded-xl text-sm font-bold disabled:opacity-40"
+        >
+          {downloading === 'all'
+            ? t('جاري التجهيز...', 'Preparing...')
+            : `📚 ${t('كل التقارير في ملف واحد', 'All reports in one file')}`}
         </button>
       </div>
 

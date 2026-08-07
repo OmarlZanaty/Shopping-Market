@@ -99,6 +99,45 @@ class SalesSummaryReportTests(TestCase):
         self.assertTrue(res.content.startswith(b'%PDF'))
 
 
+class ExportAllTests(TestCase):
+    """One workbook, a sheet per report — the owner's "كل التقارير في ملف واحد"."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(
+            phone='+201000000005', full_name='Admin', role='admin',
+            is_staff=True, is_superuser=True, is_active=True,
+        )
+        self.client_ = APIClient()
+        self.client_.force_authenticate(user=self.admin)
+
+    def test_workbook_has_a_sheet_for_every_report(self):
+        import io
+        import openpyxl
+        from apps.analytics.reports.views import ALL_REPORTS
+
+        res = self.client_.get('/api/v1/reports/export-all/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], XLSX_MIME)
+
+        wb = openpyxl.load_workbook(io.BytesIO(res.content))
+        self.assertEqual(len(wb.sheetnames), len(ALL_REPORTS))
+        self.assertIn('sales_summary', wb.sheetnames)
+        self.assertIn('out_of_stock', wb.sheetnames)
+        # Sheets are headed even when the range holds no rows.
+        self.assertEqual(wb['sales_summary'].cell(row=1, column=1).value, 'Order #')
+
+    def test_sheet_names_stay_within_excels_limits(self):
+        import io
+        import openpyxl
+
+        res = self.client_.get('/api/v1/reports/export-all/')
+        wb = openpyxl.load_workbook(io.BytesIO(res.content))
+        self.assertEqual(len(wb.sheetnames), len(set(wb.sheetnames)))
+        for name in wb.sheetnames:
+            self.assertLessEqual(len(name), 31)
+            self.assertFalse(set(name) & set('[]:*?/\\'))
+
+
 class ExistingReportsStillReachableTests(TestCase):
     """The other two sheets the owner drew already existed — keep them routed."""
 

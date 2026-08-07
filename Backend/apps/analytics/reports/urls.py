@@ -15,4 +15,6 @@ urlpatterns = [
     path('adjustments/',        r.AdjustmentsReport.as_view(),     name='adjustments'),
     path('promotions/',         r.PromotionsReport.as_view(),      name='promotions'),
     path('daily-revenue/',      r.DailyRevenueReport.as_view(),    name='daily-revenue'),
+    # Every report for the same range, one workbook, a sheet each.
+    path('export-all/',         r.AllReportsExportView.as_view(),  name='export-all'),
 ]

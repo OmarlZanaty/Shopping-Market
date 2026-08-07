@@ -178,6 +178,13 @@ export const zoneApi = {
 // them — `slug` is the path segment, e.g. 'sales-summary'.
 export const reportApi = {
   rows: (slug, params) => api.get(`/reports/${slug}/`, { params }),
+  // Every report for the same range in one workbook — a sheet per report.
+  downloadAll: (params) =>
+    api.get('/reports/export-all/', {
+      params,
+      responseType: 'blob',
+      timeout: 300000,
+    }),
   download: (slug, params, format) =>
     api.get(`/reports/${slug}/`, {
       params: { ...params, export: format },

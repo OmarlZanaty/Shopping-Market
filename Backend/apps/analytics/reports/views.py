@@ -18,7 +18,7 @@ from apps.users.models import PointsTransaction
 from apps.core.permissions import IsAdminWriteOrSupportRead
 from apps.core.scoping import scope_to_user
 from apps.core.responses import paginated, ok
-from .exporters import maybe_export
+from .exporters import export_xlsx_workbook, maybe_export
 
 
 def _parse_date(s):
@@ -584,3 +584,50 @@ class SalesSummaryReport(ReportBase):
                 'items_count': int(o.items_count or 0),
             })
         return rows
+
+
+# ───────── All reports in one workbook ──────────────────────────────────────
+
+# Order matters: it is the tab order of the exported file, so the three sheets
+# the owner works from come first.
+ALL_REPORTS = [
+    ('sales_summary',      SalesSummaryReport),
+    ('sales_details',      SalesReport),
+    ('out_of_stock',       OutOfStockReport),
+    ('daily_revenue',      DailyRevenueReport),
+    ('payments',           PaymentsReport),
+    ('cancelled_orders',   CancelledOrdersReport),
+    ('preparation_time',   PreparationTimeReport),
+    ('top_products',       TopProductsReport),
+    ('top_customers',      TopCustomersReport),
+    ('driver_performance', DriverPerformanceReport),
+    ('inventory',          InventoryReport),
+    ('adjustments',        AdjustmentsReport),
+    ('promotions',         PromotionsReport),
+]
+
+
+class AllReportsExportView(APIView):
+    """Every report for one date range, as a single .xlsx — a sheet each.
+
+    The alternative is thirteen downloads the owner then has to combine by
+    hand, which is the whole reason this endpoint exists.
+
+    One report failing must not cost the other twelve: a sheet that raises is
+    written with the error in it instead of aborting the workbook, so the file
+    still arrives and the failure is visible in the tab it belongs to.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsAdminWriteOrSupportRead]
+
+    def get(self, request):
+        from_d, to_d = _date_range(request)
+        sheets = []
+        for name, report_cls in ALL_REPORTS:
+            report = report_cls()
+            try:
+                rows = report.build_rows(request)
+                sheets.append((name, report.columns, rows))
+            except Exception as e:  # noqa: BLE001 — one bad report, twelve good ones
+                sheets.append((name, [{'key': 'error', 'label': 'Error'}],
+                               [{'error': f'{type(e).__name__}: {e}'}]))
+        return export_xlsx_workbook(f'reports_{from_d}_{to_d}', sheets)

@@ -102,6 +102,65 @@ def export_xlsx(filename, columns, rows, sheet_name='Report'):
     return response
 
 
+def export_xlsx_workbook(filename, sheets):
+    """Every report in one workbook — one sheet each.
+
+    `sheets` is [(sheet_name, columns, rows)]. Excel refuses duplicate or
+    over-long sheet names and a handful of punctuation characters, so names are
+    trimmed and de-duplicated here rather than trusting the callers.
+    """
+    if not HAS_XLSX:
+        raise RuntimeError('openpyxl not installed. pip install openpyxl')
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    header_fill = PatternFill(start_color='FF6B35', end_color='FF6B35', fill_type='solid')
+    header_font = Font(bold=True, color='FFFFFF')
+    used = set()
+
+    for raw_name, columns, rows in sheets:
+        name = ''.join(c for c in str(raw_name) if c not in '[]:*?/\\')[:31] or 'Report'
+        if name in used:
+            # ' 2', ' 3', … while staying inside Excel's 31-char ceiling.
+            base, suffix = name, 2
+            while f'{base[:28]} {suffix}' in used:
+                suffix += 1
+            name = f'{base[:28]} {suffix}'
+        used.add(name)
+        ws = wb.create_sheet(name)
+
+        for col_idx, col in enumerate(columns, start=1):
+            label = col.get('label') or col.get('label_ar') or col['key']
+            cell = ws.cell(row=1, column=col_idx, value=label)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            ws.column_dimensions[get_column_letter(col_idx)].width = max(12, min(40, len(str(label)) + 6))
+
+        for r_idx, row in enumerate(rows, start=2):
+            for c_idx, col in enumerate(columns, start=1):
+                ws.cell(row=r_idx, column=c_idx, value=_fmt(row.get(col['key'])))
+
+        ws.freeze_panes = 'A2'
+
+    # A workbook with no sheets at all is a corrupt file, not an empty one.
+    if not wb.sheetnames:
+        wb.create_sheet('Report')
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    safe_name = ''.join(c for c in filename if c.isalnum() or c in '-_') or 'reports'
+    response = HttpResponse(
+        buf.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = f'attachment; filename="{safe_name}.xlsx"'
+    return response
+
+
 def export_pdf(filename, columns, rows, title='Report', orientation='landscape'):
     if not HAS_PDF:
         raise RuntimeError('reportlab not installed. pip install reportlab')
