@@ -1,8 +1,11 @@
 from rest_framework import generics, permissions, serializers
 from rest_framework.views import APIView
 
+from django.utils import timezone
+
 from .coverage import OUT_OF_ZONE_AR, OUT_OF_ZONE_EN, covering_branch
 from .geo import circle_to_polygon, validate_geometry
+from .hours import is_open_at, schedule_of
 from .models import Branch, DeliveryZone
 from apps.users.permissions import IsAdminUser
 from apps.core.permissions import IsAdminWriteOrSupportRead
@@ -15,10 +18,20 @@ class BranchSerializer(serializers.ModelSerializer):
     # the marker reads as "this shop" rather than a generic dot.
     store_logo_url = serializers.CharField(source='store.logo_url', read_only=True)
     store_name = serializers.CharField(source='store.name', read_only=True)
+    # The customer app should be able to show "مغلق الآن" and the day's window
+    # without reimplementing the legacy-shape fallback that hours.py owns.
+    schedule = serializers.SerializerMethodField()
+    is_open_now = serializers.SerializerMethodField()
 
     class Meta:
         model = Branch
         fields = '__all__'
+
+    def get_schedule(self, obj):
+        return schedule_of(obj)
+
+    def get_is_open_now(self, obj):
+        return is_open_at(obj, timezone.localtime())
 
 
 class BranchListView(generics.ListAPIView):

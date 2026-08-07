@@ -108,6 +108,16 @@ def create_customer_order(customer, payload):
         )
         branch_id = default_branch.id if default_branch else None
 
+    # Closed means closed. The app hides checkout outside the branch's hours,
+    # but that block only counts if the server refuses the order as well.
+    if branch_id:
+        from apps.branches.models import Branch
+        from apps.branches.hours import hours_message, is_open_at
+        ordering_branch = Branch.objects.filter(pk=branch_id).first()
+        now = timezone.localtime()
+        if ordering_branch and not is_open_at(ordering_branch, now):
+            raise OrderError(hours_message(ordering_branch, now))
+
     # Build order
     delivery_fee = _resolve_delivery_fee(store_id, branch_id)
     order = Order(
