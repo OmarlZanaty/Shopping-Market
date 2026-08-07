@@ -23,6 +23,9 @@ export default function ImportProductsModal({ lang, onClose }) {
   const [preview, setPreview] = useState(null);   // dry-run result
   const [result, setResult] = useState(null);     // real import result
   const [busy, setBusy] = useState(false);
+  // Default ON: a re-imported catalogue sheet is almost always meant to correct
+  // wording and pricing, not to reset stock or hide live products.
+  const [namesPricesOnly, setNamesPricesOnly] = useState(true);
 
   const { data: history } = useQuery({
     queryKey: ['product-import-history'],
@@ -53,7 +56,7 @@ export default function ImportProductsModal({ lang, onClose }) {
     setPreview(null);
     setResult(null);
     try {
-      const res = await productApi.import(f, { dryRun: true });
+      const res = await productApi.import(f, { dryRun: true, namesPricesOnly });
       setPreview(unwrap(res));
     } catch (e) {
       toast.error(e?.message || t('فشل قراءة الملف', 'Could not read the file'));
@@ -74,7 +77,7 @@ export default function ImportProductsModal({ lang, onClose }) {
     if (!file) return;
     setBusy(true);
     try {
-      const res = await productApi.import(file, { dryRun: false });
+      const res = await productApi.import(file, { dryRun: false, namesPricesOnly });
       setResult(unwrap(res));
       setPreview(null);
       qc.invalidateQueries(['admin-products']);
@@ -211,6 +214,29 @@ export default function ImportProductsModal({ lang, onClose }) {
                 'Barcode is the key: existing barcode = update, new barcode = create. Blank cells keep the current value unchanged. If a column is filled by a formula (English name is the usual one), convert it first: Copy → Paste Special → Values.'
               )}
             </p>
+
+            {/* What the sheet is allowed to overwrite */}
+            {!result && (
+              <label className="flex items-start gap-3 bg-[#E7F0FA] border border-[#7BA4D0] rounded-xl p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={namesPricesOnly}
+                  onChange={(e) => {
+                    setNamesPricesOnly(e.target.checked);
+                    // The preview was built under the old rule — redo it.
+                    if (file) runDryRun(file);
+                  }}
+                  className="mt-0.5 w-4 h-4 accent-[#2E5E99]"
+                />
+                <span className="text-xs text-[#0D2440] leading-relaxed">
+                  <span className="font-bold block">
+                    {t('الأسماء والأسعار فقط', 'Names and prices only')}
+                  </span>
+                  {t('لا يغيّر المخزون ولا يخفي المنتجات ولا يعيد ترتيب الأقسام — أي عمود آخر في الشيت يتم تجاهله.',
+                     'Stock, availability and categories are left untouched — any other column in the sheet is ignored.')}
+                </span>
+              </label>
+            )}
 
             {/* File picker */}
             {!result && (

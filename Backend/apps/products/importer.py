@@ -43,6 +43,15 @@ UPDATE_FIELDS = [
 
 REQUIRED_FOR_CREATE = ('name_ar', 'original_price')
 
+# "Names and prices only" mode. A working catalogue sheet gets re-imported to
+# correct wording and pricing, and the owner does not expect that to also
+# rewrite stock levels, hide products, or re-file them into other categories.
+# In this mode every other column is still read and validated, but not applied.
+NAMES_AND_PRICES_FIELDS = frozenset({
+    'name_ar', 'name_en', 'description_ar', 'description_en',
+    'original_price', 'discount_price', 'cost_price',
+})
+
 _TRUE = {'1', 'true', 'yes', 'y'}
 _FALSE = {'0', 'false', 'no', 'n'}
 
@@ -159,7 +168,7 @@ def _match_categories(names_cell, category_index):
     return matched, missing
 
 
-def run_import(rows, user, store_id, dry_run=False, header_row=1):
+def run_import(rows, user, store_id, dry_run=False, header_row=1, names_prices_only=False):
     """Validate all rows and (unless dry_run) upsert products by barcode.
 
     Writes are batched: every row is validated first (no DB writes), then all
@@ -227,6 +236,18 @@ def run_import(rows, user, store_id, dry_run=False, header_row=1):
             cats_cell = _cell(row, 'categories')
             if cats_cell is not None:
                 categories, missing = _match_categories(cats_cell, category_index)
+
+            if names_prices_only:
+                dropped = sorted(set(updates) - NAMES_AND_PRICES_FIELDS)
+                updates = {f: v for f, v in updates.items() if f in NAMES_AND_PRICES_FIELDS}
+                if categories is not None:
+                    dropped.append('categories')
+                    categories, missing = None, []
+                if dropped:
+                    result['warnings'].append({
+                        'row': rownum, 'barcode': barcode,
+                        'reason': f'names/prices only — ignored: {", ".join(dropped)}',
+                    })
 
             product = existing.get(barcode)
             if product is None:

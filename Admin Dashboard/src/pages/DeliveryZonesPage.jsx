@@ -9,6 +9,7 @@ import {
   buildGeometry, editableRing, hasExtraParts,
   ringSelfIntersects, ringArea, MIN_RING_AREA,
 } from '../utils/zoneGeometry';
+import { apiError } from '../utils/apiError';
 
 /**
  * Delivery zones — draw the area a branch delivers to, instead of a radius.
@@ -23,23 +24,6 @@ import {
  */
 
 const unwrap = (res) => (res?.data?.success !== undefined ? res.data.data : res?.data);
-
-/**
- * The reason a save failed, not the envelope's generic label.
- *
- * A DRF field error arrives as { message: 'Request error', errors: [{field,
- * message}] } — showing only `message` told the admin "Request error" while the
- * actual "zone edges cross each other" sat one key away.
- */
-const apiError = (error, fallback) => {
-  const data = error?.response?.data;
-  const fields = Array.isArray(data?.errors)
-    ? data.errors.map((item) => item?.message).filter(Boolean)
-    : [];
-  if (fields.length) return fields.join(' — ');
-  const message = data?.message;
-  return message && message !== 'Request error' ? message : fallback;
-};
 
 const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 

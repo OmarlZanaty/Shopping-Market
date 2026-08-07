@@ -260,6 +260,23 @@ class BannerSerializer(serializers.ModelSerializer):
     def validate_image(self, value):
         return validate_image_upload(value)
 
+    def validate(self, attrs):
+        """A banner needs artwork, from either source — but only one of them.
+
+        The model no longer requires the upload, so this is where "a banner
+        with no picture" is caught, in the one place that can see both fields
+        and the instance being edited.
+        """
+        attrs = super().validate(attrs)
+        instance = self.instance
+        image = attrs.get('image', getattr(instance, 'image', None))
+        url = attrs.get('image_url', getattr(instance, 'image_url', '') or '')
+        if not image and not url:
+            raise serializers.ValidationError({
+                'image': 'ارفع صورة للإعلان أو اكتب رابط صورة — Upload an image or provide an image URL.',
+            })
+        return attrs
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         # Resolve a usable image_url from the uploaded file when not set explicitly.

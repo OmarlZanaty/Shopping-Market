@@ -254,10 +254,15 @@ class Banner(models.Model):
     )
 
     title_ar = models.CharField(max_length=200)
-    title_en = models.CharField(max_length=200)
+    # The shop is Arabic-first, so an English title is a nice-to-have. Making it
+    # mandatory only blocked the save on a field nobody fills.
+    title_en = models.CharField(max_length=200, blank=True)
     subtitle_ar = models.CharField(max_length=300, blank=True)
     subtitle_en = models.CharField(max_length=300, blank=True)
-    image = models.ImageField(upload_to='banners/')
+    # Artwork is either an upload or a media-library URL. Requiring the file
+    # meant a URL-only banner could never be saved — which is why this table
+    # was still empty. The serializer enforces "at least one of the two".
+    image = models.ImageField(upload_to='banners/', blank=True, null=True)
     image_url = models.URLField(blank=True)
     position = models.CharField(max_length=30, choices=BannerPosition.choices, default=BannerPosition.HOME_MAIN)
 

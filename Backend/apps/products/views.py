@@ -268,11 +268,24 @@ class AdminProductListView(generics.ListAPIView):
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminWriteOrSupportRead]
     search_fields = ['name_ar', 'name_en', 'barcode']
-    filterset_fields = ['is_available', 'is_featured', 'branch', 'sell_unit', 'store']
+    filterset_fields = ['is_available', 'is_active', 'is_featured', 'branch', 'sell_unit', 'store']
 
     def get_queryset(self):
         qs = Product.objects.all().select_related('store').prefetch_related('categories', 'images')
-        return scope_to_user(qs, self.request.user)
+        qs = scope_to_user(qs, self.request.user)
+
+        # ?stock=out|low|in — the three states the dashboard filters on. Kept out
+        # of filterset_fields because each is a comparison against
+        # quantity_in_stock, not an equality on a column.
+        stock = (self.request.query_params.get('stock') or '').strip().lower()
+        if stock == 'out':
+            qs = qs.filter(quantity_in_stock__lte=0)
+        elif stock == 'low':
+            qs = qs.filter(quantity_in_stock__gt=0,
+                           quantity_in_stock__lte=F('low_stock_threshold'))
+        elif stock == 'in':
+            qs = qs.filter(quantity_in_stock__gt=0)
+        return qs
 
 
 class AdminProductCreateView(generics.CreateAPIView):
@@ -577,6 +590,9 @@ class AdminProductImportView(APIView):
             return fail('Only .xlsx and .csv files are supported', status_code=400)
 
         dry_run = str(request.data.get('dry_run', '')).lower() in ('1', 'true')
+        # Re-importing a catalogue sheet must not silently hide products or
+        # reset stock; this restricts the write to names and prices.
+        names_prices_only = str(request.data.get('names_prices_only', '')).lower() in ('1', 'true')
         store_id = request.data.get('store_id')
         try:
             store_id = int(store_id) if store_id else None
@@ -597,8 +613,12 @@ class AdminProductImportView(APIView):
                 )
             return fail('File contains no data rows', status_code=400)
 
-        result = importer.run_import(parsed, request.user, store_id, dry_run=dry_run)
+        result = importer.run_import(
+            parsed, request.user, store_id,
+            dry_run=dry_run, names_prices_only=names_prices_only,
+        )
         result['dry_run'] = dry_run
+        result['names_prices_only'] = names_prices_only
         result['file'] = parsed.as_meta()
 
         # Unplaceable columns are the biggest cause of "the import said OK but

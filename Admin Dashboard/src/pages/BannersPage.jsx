@@ -3,9 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router-dom';
 import { bannerApi } from '../services/api';
 import toast from 'react-hot-toast';
+import { apiError } from '../utils/apiError';
 
 const POSITIONS = [['home_main','البانر الرئيسي','Home Main'],['home_secondary','البانر الثانوي','Secondary'],['category','بانر قسم','Category'],['popup','نافذة منبثقة','Popup']];
-const EMPTY = { title_ar:'', title_en:'', subtitle_ar:'', subtitle_en:'', position:'home_main', link_type:'none', sort_order:'0', is_active:true, start_date:'', end_date:'' };
+const EMPTY = { title_ar:'', title_en:'', subtitle_ar:'', subtitle_en:'', image_url:'', position:'home_main', link_type:'none', sort_order:'0', is_active:true, start_date:'', end_date:'' };
 
 export default function BannersPage() {
   const { lang } = useOutletContext();
@@ -20,6 +21,9 @@ export default function BannersPage() {
   const saveMutation = useMutation({
     mutationFn: (d) => { const fd = new FormData(); Object.entries(d).forEach(([k,v]) => { if(v!==null && v!==undefined && v!=='') fd.append(k,v); }); if(imageFile) fd.append('image', imageFile); return editing ? bannerApi.update(editing.id, fd) : bannerApi.create(fd); },
     onSuccess: () => { qc.invalidateQueries(['admin-banners']); setShowForm(false); setEditing(null); setForm(EMPTY); setImageFile(null); toast.success(t('تم الحفظ','Saved')); },
+    // Without this the 400 was swallowed: the dialog just sat there and no
+    // banner was ever created. Show what the server actually objected to.
+    onError: (e) => toast.error(apiError(e, t('فشل حفظ الإعلان','Could not save the banner'))),
   });
   const deleteMutation = useMutation({ mutationFn: (id) => bannerApi.delete(id), onSuccess: () => { qc.invalidateQueries(['admin-banners']); toast.success(t('تم الحذف','Deleted')); } });
 
@@ -65,6 +69,13 @@ export default function BannersPage() {
                   <span className="text-sm text-gray-500">{imageFile ? imageFile.name : t('اختر صورة الإعلان','Choose banner image')}</span>
                   <input type="file" accept="image/*" className="hidden" onChange={e => setImageFile(e.target.files?.[0])} />
                 </label>
+                {/* Or paste one from the media library — the backend accepts either. */}
+                <input
+                  value={form.image_url}
+                  onChange={e => setForm(f => ({...f, image_url:e.target.value}))}
+                  placeholder={t('أو الصق رابط صورة','or paste an image URL')}
+                  className={`${inp} mt-2`} dir="ltr"
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">{t('العنوان عربي','Title Arabic')}</label><input value={form.title_ar} onChange={e => setForm(f => ({...f,title_ar:e.target.value}))} className={inp} dir="rtl" /></div>
@@ -88,7 +99,15 @@ export default function BannersPage() {
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setShowForm(false)} className="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-semibold">{t('إلغاء','Cancel')}</button>
-              <button onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending || !form.title_ar}
+              <button
+                onClick={() => {
+                  // Say it here rather than let the server bounce it back.
+                  if (!imageFile && !form.image_url && !editing?.image_url) {
+                    return toast.error(t('ارفع صورة للإعلان أو الصق رابط صورة','Upload an image or paste an image URL'));
+                  }
+                  return saveMutation.mutate(form);
+                }}
+                disabled={saveMutation.isPending || !form.title_ar}
                 className="flex-1 bg-[#2E5E99] text-white rounded-xl py-2.5 text-sm font-bold disabled:opacity-40">
                 {saveMutation.isPending ? '...' : t('حفظ','Save')}</button>
             </div>

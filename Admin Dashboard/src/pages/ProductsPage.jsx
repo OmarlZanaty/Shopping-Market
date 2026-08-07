@@ -16,10 +16,23 @@ export default function ProductsPage() {
   const [page, setPage] = useState(1);
   const [barcodeInput, setBarcodeInput] = useState('');
   const [showImport, setShowImport] = useState(false);
+  const [status, setStatus] = useState('');
+
+  // Each chip is one query the admin list already understands: `active` and
+  // `unavailable` are column equalities, `out` is the stock comparison the
+  // view resolves against quantity_in_stock.
+  const STATUS_PARAMS = {
+    '':            {},
+    active:        { is_active: true },
+    unavailable:   { is_available: false },
+    out:           { stock: 'out' },
+  };
 
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-products', search, category, page],
-    queryFn: () => productApi.list({ search, category, page }).then(r => r.data),
+    queryKey: ['admin-products', search, category, page, status],
+    queryFn: () => productApi
+      .list({ search, category, page, ...STATUS_PARAMS[status] })
+      .then(r => r.data),
   });
 
   const toggleMutation = useMutation({
@@ -109,6 +122,28 @@ export default function ProductsPage() {
               {t('بحث', 'Scan')}
             </button>
           </div>
+        </div>
+
+        {/* Status filters */}
+        <div className="flex gap-2 flex-wrap mt-3">
+          {[
+            ['',            t('الكل', 'All')],
+            ['active',      t('نشطة', 'Active')],
+            ['unavailable', t('غير موجودة', 'Unavailable')],
+            ['out',         t('خلصت', 'Out of stock')],
+          ].map(([value, label]) => (
+            <button
+              key={value || 'all'}
+              onClick={() => { setStatus(value); setPage(1); }}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                status === value
+                  ? 'bg-[#2E5E99] border-[#2E5E99] text-white'
+                  : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
