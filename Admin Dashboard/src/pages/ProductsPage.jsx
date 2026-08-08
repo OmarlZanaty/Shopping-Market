@@ -21,9 +21,15 @@ export default function ProductsPage() {
   // Each chip is one query the admin list already understands: `active` and
   // `unavailable` are column equalities, `out` is the stock comparison the
   // view resolves against quantity_in_stock.
+  //
+  // نشطة filters is_available, NOT is_active. The الحالة toggle in the table
+  // renders is_available (and its endpoint is .../availability/), so filtering
+  // on is_active listed rows whose toggle was grey — the two fields are
+  // independent. Keeping the chip on the same field the column shows makes
+  // نشطة and غير موجودة exact opposites, which is what the owner expects.
   const STATUS_PARAMS = {
     '':            {},
-    active:        { is_active: true },
+    active:        { is_available: true },
     unavailable:   { is_available: false },
     out:           { stock: 'out' },
   };
