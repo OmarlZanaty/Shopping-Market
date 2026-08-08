@@ -22,44 +22,15 @@ Future<void> _bgHandler(RemoteMessage message) async {
 
   // Re-register channels so AwesomeNotifications can create the local
   // notification in this isolate (channels are per-process, not persisted).
+  // Shares AgentNotificationService.channels so the custom tone can't drift
+  // between the foreground and background definitions.
   await AwesomeNotifications().initialize(
     null,
-    [
-      NotificationChannel(
-        channelKey: 'agent_new_order',
-        channelName: 'طلبات جديدة',
-        channelDescription: 'تنبيه عند ورود طلب جديد للوكيل',
-        importance: NotificationImportance.Max,
-        channelShowBadge: true,
-        playSound: true,
-        enableVibration: true,
-        criticalAlerts: true,
-        defaultColor: const Color(0xFFFF6B35),
-        ledColor: const Color(0xFFFF6B35),
-      ),
-      NotificationChannel(
-        channelKey: 'agent_adjustment',
-        channelName: 'تحديثات الطلب',
-        channelDescription: 'رد العميل على تعديلات الأسعار/الأوزان/البدائل',
-        importance: NotificationImportance.High,
-        playSound: true,
-        enableVibration: true,
-      ),
-      NotificationChannel(
-        channelKey: 'agent_general',
-        channelName: 'إشعارات عامة',
-        channelDescription: 'إشعارات النظام والمحادثات',
-        importance: NotificationImportance.Default,
-      ),
-    ],
+    AgentNotificationService.channels,
   );
 
   final type = message.data['type'] ?? '';
-  final channelKey = type == 'new_order'
-      ? 'agent_new_order'
-      : (type == 'order_status' || type == 'adjustment_response')
-          ? 'agent_adjustment'
-          : 'agent_general';
+  final channelKey = AgentNotificationService.channelForType(type);
 
   await AwesomeNotifications().createNotification(
     content: NotificationContent(

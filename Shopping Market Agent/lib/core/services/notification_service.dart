@@ -13,6 +13,74 @@ class AgentNotificationService {
   AgentNotificationService._();
   static final AgentNotificationService I = AgentNotificationService._();
 
+  /// Custom notification tone. Android reads it from res/raw/notification_sound.mp3;
+  /// on iOS awesome_notifications resolves this to notification_sound.aiff in the
+  /// app bundle (its resource lookup hardcodes the .aiff extension).
+  static const _soundSource = 'resource://raw/notification_sound';
+
+  /// Android freezes a channel's sound at creation time — an existing install
+  /// keeps the old (default) tone no matter what we pass on the next launch, and
+  /// deleting + recreating the same id restores the old settings too. So the sound
+  /// can only change by publishing NEW channel keys; bump the suffix whenever the
+  /// tone or importance changes. Devices on an older build still receive pushes:
+  /// an unknown channel_id falls back to the default channel in their manifest.
+  ///
+  /// These keys must stay in sync with `_android_channel()` in the backend
+  /// (Backend/apps/notifications/utils.py) — Android 8+ drops a push whose
+  /// channel_id it doesn't recognise and can't fall back from.
+  static const newOrderChannel   = 'agent_new_order_v2';
+  static const adjustmentChannel = 'agent_adjustment_v2';
+  /// Deliberately silent, so it keeps its original key — no sound to change.
+  static const generalChannel    = 'agent_general';
+
+  /// The single channel definition, shared by [init] and the background isolate
+  /// in main.dart — channels are per-process, so the isolate has to declare the
+  /// identical set or a background push would recreate them without the tone.
+  static List<NotificationChannel> get channels => [
+        NotificationChannel(
+          channelKey: newOrderChannel,
+          channelName: 'طلبات جديدة',
+          channelDescription: 'تنبيه عند ورود طلب جديد للوكيل',
+          importance: NotificationImportance.Max,
+          channelShowBadge: true,
+          playSound: true,
+          soundSource: _soundSource,
+          enableVibration: true,
+          criticalAlerts: true,
+          defaultColor: const Color(0xFFFF6B35),
+          ledColor: const Color(0xFFFF6B35),
+        ),
+        NotificationChannel(
+          channelKey: adjustmentChannel,
+          channelName: 'تحديثات الطلب',
+          channelDescription: 'رد العميل على تعديلات الأسعار/الأوزان/البدائل',
+          importance: NotificationImportance.High,
+          playSound: true,
+          soundSource: _soundSource,
+          enableVibration: true,
+        ),
+        NotificationChannel(
+          channelKey: generalChannel,
+          channelName: 'إشعارات عامة',
+          channelDescription: 'إشعارات النظام والمحادثات',
+          importance: NotificationImportance.Default,
+          playSound: false,
+        ),
+      ];
+
+  /// Channel for an incoming FCM payload's `type`. Mirrors `_android_channel()`
+  /// in Backend/apps/notifications/utils.py.
+  static String channelForType(String type) => type == 'new_order'
+      ? newOrderChannel
+      : (type == 'order_status' ||
+              type == 'adjustment_response' ||
+              type == 'price_change' ||
+              type == 'substitute' ||
+              type == 'item_added' ||
+              type == 'quantity_change')
+          ? adjustmentChannel
+          : generalChannel;
+
   final _newOrderCtrl = StreamController<Map<String, dynamic>>.broadcast();
   /// Fires whenever an FCM message of type=new_order arrives in foreground.
   Stream<Map<String, dynamic>> get newOrderStream => _newOrderCtrl.stream;
@@ -55,35 +123,7 @@ class AgentNotificationService {
     // ── Awesome Notifications ─────────────────────────────────────────────
     await AwesomeNotifications().initialize(
       null, // small icon — null uses launcher icon
-      [
-        NotificationChannel(
-          channelKey: 'agent_new_order',
-          channelName: 'طلبات جديدة',
-          channelDescription: 'تنبيه عند ورود طلب جديد للوكيل',
-          importance: NotificationImportance.Max,
-          channelShowBadge: true,
-          playSound: true,
-          enableVibration: true,
-          criticalAlerts: true,
-          defaultColor: const Color(0xFFFF6B35),
-          ledColor: const Color(0xFFFF6B35),
-        ),
-        NotificationChannel(
-          channelKey: 'agent_adjustment',
-          channelName: 'تحديثات الطلب',
-          channelDescription: 'رد العميل على تعديلات الأسعار/الأوزان/البدائل',
-          importance: NotificationImportance.High,
-          playSound: true,
-          enableVibration: true,
-        ),
-        NotificationChannel(
-          channelKey: 'agent_general',
-          channelName: 'إشعارات عامة',
-          channelDescription: 'إشعارات النظام والمحادثات',
-          importance: NotificationImportance.Default,
-          playSound: false,
-        ),
-      ],
+      channels,
       debug: kDebugMode,
     );
 
@@ -158,7 +198,7 @@ class AgentNotificationService {
     if (type == 'new_order') {
       _newOrderCtrl.add(Map<String, dynamic>.from(msg.data));
       _showLocalNotification(
-        channelKey: 'agent_new_order',
+        channelKey: newOrderChannel,
         title: msg.notification?.title ?? 'طلب جديد',
         body: msg.notification?.body ?? '',
         payload: payload,
@@ -166,21 +206,21 @@ class AgentNotificationService {
     } else if (type == 'order_status') {
       // Status changed on an order the agent is handling
       _showLocalNotification(
-        channelKey: 'agent_adjustment',
+        channelKey: adjustmentChannel,
         title: msg.notification?.title ?? 'تحديث الطلب',
         body: msg.notification?.body ?? msg.data['body_ar'] ?? '',
         payload: payload,
       );
     } else if (type == 'adjustment_response') {
       _showLocalNotification(
-        channelKey: 'agent_adjustment',
+        channelKey: adjustmentChannel,
         title: msg.notification?.title ?? 'تحديث على الطلب',
         body: msg.notification?.body ?? '',
         payload: payload,
       );
     } else {
       _showLocalNotification(
-        channelKey: 'agent_general',
+        channelKey: generalChannel,
         title: msg.notification?.title ?? 'إشعار',
         body: msg.notification?.body ?? '',
         payload: payload,

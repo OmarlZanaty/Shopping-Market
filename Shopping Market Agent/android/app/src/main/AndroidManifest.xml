@@ -56,10 +56,11 @@
         </activity>
 
         <!-- FCM default channel for new_order — must match the channelKey used
-             on the server when sending the notification payload. -->
+             on the server when sending the notification payload
+             (AgentNotificationService.newOrderChannel). -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="agent_new_order"/>
+            android:value="agent_new_order_v2"/>
 
         <meta-data
             android:name="flutterEmbedding"

@@ -16,12 +16,18 @@ from .models import InAppNotification
 logger = logging.getLogger(__name__)
 
 # ── Android channel helpers ────────────────────────────────────────────────────
-# The customer app registers: 'market_fresh_orders', 'market_fresh_promotions'
-# The agent app (preparer/driver) registers: 'agent_new_order', 'agent_adjustment',
-#   'agent_general'
+# The customer app registers: 'market_fresh_orders_v2', 'market_fresh_promotions_v2'
+# The agent app (preparer/driver) registers: 'agent_new_order_v2',
+#   'agent_adjustment_v2', 'agent_general'
 # Android 8+ silently drops notifications whose channel_id is not registered on
 # the device, so we must send the EXACT channel key the app created — a mismatch
 # here makes background/killed-app pushes vanish on Android 8+.
+#
+# The '_v2' suffix carries the custom notification tone: Android freezes a
+# channel's sound at creation time, so the apps had to publish new channel keys
+# to change it. Devices still on a pre-v2 build keep receiving pushes — an
+# unknown channel_id falls back to the default channel in their own manifest.
+# Bump both sides together whenever the tone changes again.
 
 _AGENT_ROLES = frozenset(('preparer', 'driver'))
 
@@ -31,17 +37,17 @@ def _android_channel(user, notif_type: str) -> str:
     role = getattr(user, 'role', '') or ''
     if role in _AGENT_ROLES:
         if notif_type == 'new_order':
-            return 'agent_new_order'
+            return 'agent_new_order_v2'
         if notif_type in ('order_status', 'adjustment_response',
                           'price_change', 'substitute',
                           'item_added', 'quantity_change'):
-            return 'agent_adjustment'
+            return 'agent_adjustment_v2'
         return 'agent_general'
     # customer / admin / unknown → customer app channels. Promotions/stock use
     # the lighter channel; everything else uses the high-importance orders one.
     if notif_type in ('promotion', 'stock_available'):
-        return 'market_fresh_promotions'
-    return 'market_fresh_orders'
+        return 'market_fresh_promotions_v2'
+    return 'market_fresh_orders_v2'
 
 
 def _persist_in_app(user, title_ar, title_en, body_ar, body_en, notif_type, data):
@@ -143,7 +149,9 @@ def send_push_notification(user, title_ar, title_en, body_ar, body_en, data=None
             ),
             apns=messaging.APNSConfig(
                 payload=messaging.APNSPayload(
-                    aps=messaging.Aps(sound='notification_sound.wav'),
+                    # Must name a file bundled in ios/Runner — see
+                    # notification_sound.aiff in both apps.
+                    aps=messaging.Aps(sound='notification_sound.aiff'),
                 ),
             ),
             token=user.fcm_token,
@@ -208,7 +216,9 @@ def send_bulk_push(users_qs, title_ar, title_en, body_ar, body_en, data=None):
             ),
             apns=messaging.APNSConfig(
                 payload=messaging.APNSPayload(
-                    aps=messaging.Aps(sound='notification_sound.wav'),
+                    # Must name a file bundled in ios/Runner — see
+                    # notification_sound.aiff in both apps.
+                    aps=messaging.Aps(sound='notification_sound.aiff'),
                 ),
             ),
             tokens=tokens,

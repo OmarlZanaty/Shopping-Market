@@ -10,6 +10,26 @@ class NotificationService {
   factory NotificationService() => _instance;
   NotificationService._internal();
 
+  /// Custom notification tone. Android reads it from res/raw/notification_sound.mp3;
+  /// on iOS awesome_notifications resolves this to notification_sound.aiff in the
+  /// app bundle (its resource lookup hardcodes the .aiff extension).
+  static const _soundSource = 'resource://raw/notification_sound';
+
+  /// Android freezes a channel's sound at creation time — an existing install
+  /// keeps the old (default) tone no matter what we pass on the next launch, and
+  /// deleting + recreating the same id restores the old settings too. So the sound
+  /// can only change by publishing NEW channel keys; bump the suffix whenever the
+  /// tone or importance changes. Devices on an older build still receive pushes:
+  /// an unknown channel_id falls back to the default channel in their manifest.
+  ///
+  /// These keys must stay in sync with `_android_channel()` in the backend
+  /// (Backend/apps/notifications/utils.py) — Android 8+ drops a push whose
+  /// channel_id it doesn't recognise and can't fall back from.
+  static const orderChannel     = 'market_fresh_orders_v2';
+  static const promoChannel     = 'market_fresh_promotions_v2';
+  static const driverNewOrder   = 'driver_new_orders_v2';
+  static const driverUpdates    = 'driver_updates_v2';
+
   final _fcm = FirebaseMessaging.instance;
 
   Future<void> init() async {
@@ -23,7 +43,7 @@ class NotificationService {
       null,
       [
         NotificationChannel(
-          channelKey: 'market_fresh_orders',
+          channelKey: orderChannel,
           channelName: 'Order Updates',
           channelDescription: 'Order status updates and delivery notifications',
           defaultColor: AppColors.sapphire,
@@ -31,16 +51,18 @@ class NotificationService {
           importance: NotificationImportance.High,
           channelShowBadge: true,
           playSound: true,
-          // REMOVED: soundSource - uses default system sound
+          soundSource: _soundSource,
           enableVibration: true,
         ),
         NotificationChannel(
-          channelKey: 'market_fresh_promotions',
+          channelKey: promoChannel,
           channelName: 'Promotions',
           channelDescription: 'Deals and offers',
           defaultColor: AppColors.coral,
           importance: NotificationImportance.Default,
           channelShowBadge: true,
+          playSound: true,
+          soundSource: _soundSource,
         ),
       ],
     );
@@ -111,7 +133,7 @@ class NotificationService {
       null,
       [
         NotificationChannel(
-          channelKey: 'driver_new_orders',
+          channelKey: driverNewOrder,
           channelName: 'New Orders Alert',
           channelDescription: 'Loud alert for new delivery orders',
           defaultColor: AppColors.coral,
@@ -119,19 +141,19 @@ class NotificationService {
           importance: NotificationImportance.Max,
           channelShowBadge: true,
           playSound: true,
-          // REMOVED: soundSource - uses default system sound
+          soundSource: _soundSource,
           enableVibration: true,
           vibrationPattern: highVibrationPattern,
           criticalAlerts: true,
         ),
         NotificationChannel(
-          channelKey: 'driver_updates',
+          channelKey: driverUpdates,
           channelName: 'Order Updates',
           channelDescription: 'Customer approval responses',
           defaultColor: AppColors.sapphire,
           importance: NotificationImportance.High,
           playSound: true,
-          // REMOVED: soundSource
+          soundSource: _soundSource,
         ),
       ],
     );
@@ -151,7 +173,7 @@ class NotificationService {
         title: data['title_ar'] ?? 'Market Fresh',
         body: data['body_ar'] ?? '',
         orderId: data['order_id'],
-        channelKey: 'market_fresh_orders',
+        channelKey: orderChannel,
       );
     } else if (['price_change', 'substitute', 'item_added', 'quantity_change'].contains(type)) {
       _showAdjustmentNotification(data);
@@ -159,13 +181,13 @@ class NotificationService {
       _showBasicNotification(
         title: '📦 المنتج متاح الآن!',
         body: data['body_ar'] ?? '',
-        channelKey: 'market_fresh_promotions',
+        channelKey: promoChannel,
       );
     } else if (type == 'promotion') {
       _showBasicNotification(
         title: data['title_ar'] ?? '🎉 عرض جديد!',
         body: data['body_ar'] ?? '',
-        channelKey: 'market_fresh_promotions',
+        channelKey: promoChannel,
       );
     }
   }
@@ -180,7 +202,7 @@ class NotificationService {
       _showBasicNotification(
         title: data['approved'] == 'true' ? '✅ العميل وافق' : '❌ العميل رفض',
         body: 'تم تحديث الفاتورة',
-        channelKey: 'driver_updates',
+        channelKey: driverUpdates,
       );
     }
   }
@@ -208,7 +230,7 @@ class NotificationService {
     await AwesomeNotifications().createNotification(
       content: NotificationContent(
         id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-        channelKey: 'market_fresh_orders',
+        channelKey: orderChannel,
         title: data['title_ar'] ?? '⚠️ تعديل على طلبك',
         body: data['body_ar'] ?? '',
         notificationLayout: NotificationLayout.Default,
@@ -229,7 +251,7 @@ class NotificationService {
     await AwesomeNotifications().createNotification(
       content: NotificationContent(
         id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-        channelKey: 'driver_new_orders',
+        channelKey: driverNewOrder,
         title: '🛒 طلب جديد!',
         body: data['customer_name'] ?? 'طلب جديد يحتاج إلى استلام',
         notificationLayout: NotificationLayout.Default,
